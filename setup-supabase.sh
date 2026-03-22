@@ -38,8 +38,11 @@ echo ""
 echo "  You will need two connection strings from the Supabase dashboard:"
 echo "  Dashboard → Settings → Database → Connection string"
 echo ""
-echo "  • DATABASE_URL     = 'Transaction' mode (port 6543)"
-echo "  • DIRECT_DATABASE_URL = 'Session' mode (port 5432)"
+echo "  • DATABASE_URL        = 'Transaction' pooler (port 6543) — runtime"
+echo "  • DIRECT_DATABASE_URL = 'Direct connection' (port 5432)  — migrations"
+echo ""
+echo "  ⚠  If port 5432 is blocked (e.g. EC2), use the 'Session' pooler instead:"
+echo "     aws-x-[region].pooler.supabase.com:5432  (supports Prisma migrations)"
 echo ""
 
 # ── 1. Environment file ───────────────────────────────────────────────────────
@@ -77,7 +80,9 @@ if [ "$CHOICE" = "1" ]; then
   [ -f "$ENV_FILE" ] && CURRENT_DIRECT_URL=$(grep "^DIRECT_DATABASE_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || echo "")
   echo ""
   echo -e "  ${B}Direct connection URL${N} (port 5432, used for migrations)"
-  echo -e "  Example: postgresql://postgres:pass@db.xxxx.supabase.co:5432/postgres"
+  echo -e "  Example: postgresql://postgres:pass@db.xxxx.supabase.co:5432/postgres?sslmode=require"
+  echo -e "  ${Y}  If port 5432 is blocked use the Session pooler:${N}"
+  echo -e "  ${Y}  postgresql://postgres.xxxx:pass@aws-0-[region].pooler.supabase.com:5432/postgres?sslmode=require${N}"
   [ -n "$CURRENT_DIRECT_URL" ] && echo -e "  Current:  $CURRENT_DIRECT_URL"
   read -rp "  DIRECT_DATABASE_URL: " NEW_DIRECT_URL
   DIRECT_URL="${NEW_DIRECT_URL:-$CURRENT_DIRECT_URL}"
@@ -97,6 +102,8 @@ JWT_EXPIRES_IN=7d
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 UPLOAD_DIR=./uploads
+EMAIL_USER=
+EMAIL_APP_PASSWORD=
 EOF
     fi
   fi
@@ -127,10 +134,10 @@ else
   ok "Using existing .env values"
 fi
 
-# Validate the URLs are set
-source "$ENV_FILE" 2>/dev/null || true
-[ -z "${DATABASE_URL:-}" ] && fail "DATABASE_URL is not set in .env"
-[ -z "${DIRECT_DATABASE_URL:-}" ] && fail "DIRECT_DATABASE_URL is not set in .env"
+# Validate the URLs are set — use grep, not source, since Postgres URLs
+# contain '?', '&', '=' characters that bash misinterprets when sourcing.
+grep -qE '^DATABASE_URL=.+' "$ENV_FILE"       || fail "DATABASE_URL is not set in .env"
+grep -qE '^DIRECT_DATABASE_URL=.+' "$ENV_FILE" || fail "DIRECT_DATABASE_URL is not set in .env"
 
 # ── 2. npm install ────────────────────────────────────────────────────────────
 step "npm dependencies"
