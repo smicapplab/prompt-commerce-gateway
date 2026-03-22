@@ -67,13 +67,11 @@ export class PaymentService {
 
   // ── Initiate payment ───────────────────────────────────────────────────────
 
-  // NOTE: `db` is cast to `any` below because the Prisma client was generated
-  // before `prisma migrate dev --name add_payment_gateway` was run.
   // After running the migration + `prisma generate`, these casts can be removed.
-  private get db(): any { return this.prisma; }
+
 
   async initiatePayment(input: InitiatePaymentInput): Promise<PaymentRecord> {
-    const retailer: any = await this.db.retailer.findUnique({
+    const retailer = await this.prisma.retailer.findUnique({
       where: { slug: input.storeSlug },
     });
     if (!retailer) throw new NotFoundException(`Store "${input.storeSlug}" not found`);
@@ -99,7 +97,7 @@ export class PaymentService {
     const result = await adapter.initiatePayment(orderCtx);
 
     // Persist the payment record
-    const payment = await this.db.payment.create({
+    const payment = await this.prisma.payment.create({
       data: {
         referenceId: result.referenceId,
         storeSlug:   input.storeSlug,
@@ -129,7 +127,7 @@ export class PaymentService {
     body:      unknown,
     signature: string,
   ): Promise<WebhookEvent | null> {
-    const retailer: any = await this.db.retailer.findUnique({
+    const retailer = await this.prisma.retailer.findUnique({
       where: { slug: storeSlug },
     });
     if (!retailer) return null;
@@ -142,7 +140,7 @@ export class PaymentService {
 
     // Update the Payment record's status
     try {
-      await this.db.payment.update({
+      await this.prisma.payment.update({
         where: { referenceId: event.referenceId },
         data:  { status: event.status },
       });
@@ -158,11 +156,11 @@ export class PaymentService {
   // ── Lookup ─────────────────────────────────────────────────────────────────
 
   async findByReference(referenceId: string) {
-    return this.db.payment.findUnique({ where: { referenceId } });
+    return this.prisma.payment.findUnique({ where: { referenceId } });
   }
 
   async findByOrder(storeSlug: string, orderId: number) {
-    return this.db.payment.findFirst({
+    return this.prisma.payment.findFirst({
       where: { storeSlug, orderId },
       orderBy: { createdAt: 'desc' },
     });
@@ -179,7 +177,7 @@ export class PaymentService {
       paymentWebhookSecret?: string | null;
     },
   ) {
-    await this.db.retailer.update({
+    await this.prisma.retailer.update({
       where: { slug: storeSlug },
       data:  config,
     });
@@ -188,7 +186,7 @@ export class PaymentService {
   // ── Get payment config status (public key only — never expose secret key) ─
 
   async getPaymentConfigStatus(storeSlug: string) {
-    const retailer: any = await this.db.retailer.findUnique({
+    const retailer = await this.prisma.retailer.findUnique({
       where:  { slug: storeSlug },
     });
     return {

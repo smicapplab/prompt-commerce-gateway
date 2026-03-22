@@ -122,8 +122,7 @@ export class CatalogController {
       paymentWebhookSecret?: string | null;
     },
   ) {
-    // Cast to any until prisma generate picks up the new payment columns
-    const retailer = await this.validateKey(slug, platformKey) as any;
+    const retailer = await this.validateKey(slug, platformKey);
 
     await this.registry.update(retailer.id, {
       paymentProvider:      body.paymentProvider      ?? null,
@@ -146,8 +145,7 @@ export class CatalogController {
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
   ) {
-    // Cast to any until prisma generate picks up the new payment columns
-    const retailer = await this.validateKey(slug, platformKey) as any;
+    const retailer = await this.validateKey(slug, platformKey);
     return {
       provider:     retailer.paymentProvider  ?? 'mock',
       hasApiKey:    !!retailer.paymentApiKey,
