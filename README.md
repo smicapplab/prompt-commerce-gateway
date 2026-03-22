@@ -81,6 +81,7 @@ The gateway supports multiple payment providers via a pluggable adapter system:
 - **PayMongo** — GCash, Maya, and GrabPay support via redirect.
 - **Mock** — Instant success for testing and demo purposes.
 - **Webhooks** — Dedicated module for receiving and verifying status updates from providers, automatically updating order status and notifying the buyer via Telegram.
+- **Shared Order Lifecycle** — Support for the standardized progression: `pending` → `paid` → `picking` → `packing` → `ready_for_pickup` → `in_transit` → `delivered`.
 
 ### Delta Sync (Seller → Gateway)
 
