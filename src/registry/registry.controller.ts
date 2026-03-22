@@ -1,0 +1,155 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Query,
+  Body,
+  ParseIntPipe,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  UseInterceptors,
+  UploadedFile,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import path from 'path';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { KeysService } from '../keys/keys.service';
+import { RegistryService, type RegisterRetailerDto, type UpdateRetailerDto } from './registry.service';
+
+// ── Public registration ────────────────────────────────────────────────────────
+
+@Controller('api/register')
+export class RegistrationController {
+  constructor(private readonly registry: RegistryService) {}
+
+  /**
+   * POST /api/register
+   * Public endpoint — retailers submit their details + business permit.
+   * Creates an unverified retailer record. Admin must verify manually.
+   */
+  @Post()
+  @UseInterceptors(
+    FileInterceptor('businessPermit', {
+      storage: diskStorage({
+        destination: process.env.UPLOAD_DIR ?? './uploads',
+        filename: (_req, file, cb) => {
+          const ext = path.extname(file.originalname);
+          cb(null, `permit_${Date.now()}${ext}`);
+        },
+      }),
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+    }),
+  )
+  async register(
+    @Body() body: RegisterRetailerDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const dto: RegisterRetailerDto = {
+      ...body,
+      businessPermitUrl: file ? file.path : undefined,
+    };
+    const retailer = await this.registry.register(dto);
+    return {
+      message: 'Registration submitted. You will receive your platform key by email once verified.',
+      id: retailer.id,
+      slug: retailer.slug,
+    };
+  }
+}
+
+// ── Public store lookup ────────────────────────────────────────────────────────
+
+@Controller('api/stores')
+export class StoresController {
+  constructor(
+    private readonly keysService: KeysService,
+  ) {}
+
+  /**
+   * GET /api/stores/lookup?key=<platform_key>
+   * Public endpoint — validates a platform key and returns the store's
+   * public details (slug, name, mcpServerUrl). Used by the seller admin
+   * UI to auto-fill the "Add Store" form without manual slug entry.
+   *
+   * Returns 400 if no key provided, 404 if key is invalid/revoked/inactive.
+   */
+  @Get('lookup')
+  async lookupByKey(@Query('key') key: string) {
+    if (!key?.trim()) {
+      throw new BadRequestException('key query parameter is required.');
+    }
+
+    const retailer = await this.keysService.validateKey(key.trim());
+    if (!retailer) {
+      throw new NotFoundException('No active store found for this key.');
+    }
+
+    return {
+      slug: retailer.slug,
+      name: retailer.name,
+      mcpServerUrl: retailer.mcpServerUrl,
+    };
+  }
+}
+
+// ── Admin registry management ─────────────────────────────────────────────────
+
+@UseGuards(JwtAuthGuard)
+@Controller('api/retailers')
+export class RetailersController {
+  constructor(
+    private readonly registry: RegistryService,
+  ) {}
+
+  /** GET /api/retailers */
+  @Get()
+  findAll() {
+    return this.registry.findAll();
+  }
+
+  /** GET /api/retailers/:id */
+  @Get(':id')
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.registry.findById(id);
+  }
+
+  /** PATCH /api/retailers/:id — verify, update URL, toggle active, etc. */
+  @Patch(':id')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateRetailerDto,
+  ) {
+    return this.registry.update(id, dto);
+  }
+
+  /** DELETE /api/retailers/:id */
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.registry.remove(id);
+  }
+
+  /** POST /api/retailers/:id/keys/issue — issue or rotate platform key */
+  @Post(':id/keys/issue')
+  async issueKey(@Param('id', ParseIntPipe) id: number) {
+    const key = await this.registry.issueKey(id);
+    return {
+      message: 'Platform key issued and emailed to retailer.',
+      platform_key: key,
+    };
+  }
+
+  /** DELETE /api/retailers/:id/keys — revoke active key */
+  @Delete(':id/keys')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  revokeKey(@Param('id', ParseIntPipe) id: number) {
+    return this.registry.revokeKey(id);
+  }
+}

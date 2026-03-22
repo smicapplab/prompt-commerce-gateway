@@ -1,0 +1,39 @@
+services:
+  # ── Local Postgres (dev only) ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pc_gateway
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"   # using 5433 externally to avoid conflict with any local Postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Gateway (full-stack Docker mode) ──────────────────────────────────────
+  # For local dev, prefer running `npm run dev` directly and only
+  # using `docker-compose up postgres` for the DB.
+  gateway:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/pc_gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - full   # only starts with: docker-compose --profile full up
+
+volumes:
+  postgres_data:

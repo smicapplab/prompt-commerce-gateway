@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Render Blueprint — Prompt Commerce Gateway
+# https://render.com/docs/blueprint-spec
+#
+# Commit this file to the repo root.  In Render dashboard → "New Blueprint"
+# and point it at this repo — Render will create the service automatically.
+#
+# Secrets (DATABASE_URL, JWT_SECRET, ADMIN_PASSWORD) are marked sync:false
+# so they are NEVER read from this file at deploy time; they are set once
+# via the dashboard or setup-render.sh and stored in Render's secret store.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: prompt-commerce-gateway
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    branch: main
+    plan: free
+    healthCheckPath: /
+
+    envVars:
+      # ── Database ─────────────────────────────────────────────────────────────
+      # Value set once via Render dashboard or setup-render.sh — never synced
+      - key: DATABASE_URL
+        sync: false
+
+      # ── Auth ─────────────────────────────────────────────────────────────────
+      - key: JWT_SECRET
+        generateValue: true        # Render generates a secure random value
+
+      - key: JWT_EXPIRES_IN
+        value: 1d
+
+      # ── Admin seed account ────────────────────────────────────────────────────
+      - key: ADMIN_USERNAME
+        value: admin
+
+      - key: ADMIN_PASSWORD
+        generateValue: true        # Render generates a secure random value
+
+      # ── File uploads ──────────────────────────────────────────────────────────
+      # NOTE: Render free-tier has an ephemeral filesystem.
+      # Uploaded files (business permits) will not survive deploys.
+      # Consider swapping to Supabase Storage or S3 for persistence.
+      - key: UPLOAD_DIR
+        value: ./uploads
