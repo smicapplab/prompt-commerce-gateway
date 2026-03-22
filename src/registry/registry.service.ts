@@ -29,6 +29,11 @@ export interface UpdateRetailerDto {
   aiApiKey?:       string | null;
   aiModel?:        string | null;
   aiSystemPrompt?: string | null;
+  // Payment gateway config
+  paymentProvider?:      string | null;
+  paymentApiKey?:        string | null;
+  paymentPublicKey?:     string | null;
+  paymentWebhookSecret?: string | null;
 }
 
 @Injectable()

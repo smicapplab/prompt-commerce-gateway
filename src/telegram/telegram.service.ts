@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger, Optional } from '@nestjs/common';
 import { Bot, InlineKeyboard } from 'grammy';
 import { RegistryService } from '../registry/registry.service';
 import { SettingsService } from '../settings/settings.service';
@@ -6,6 +6,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { callRetailerTool } from '../mcp/retailer-client';
 import { AiChatService, type StoreAiConfig } from './ai-chat.service';
 import { CartStore } from './cart.store';
+import type { PaymentService } from '../payments/payment.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
          productListKeyboard, productDetailKeyboard, cartKeyboard,
          emptyCartKeyboard, aiModeKeyboard, backKeyboard } from './keyboards';
@@ -119,6 +120,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly settings: SettingsService,
     private readonly catalog: CatalogService,
     private readonly aiChat: AiChatService,
+    @Optional() private readonly paymentService?: PaymentService,
   ) {}
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
@@ -727,6 +729,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const orderItems = items.map(i => ({ product_id: i.productId, quantity: i.quantity }));
 
     try {
+      // ── Step 1: Create the order in the seller's store ──────────────────────
       const result = await callRetailerTool(retailer, 'create_order', {
         items: orderItems,
         buyer_ref: String(userId),
@@ -742,6 +745,57 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       CartStore.clear(userId, slug);
       this.checkoutSessions.delete(userId);
 
+      // ── Step 2: Initiate payment if PaymentService is wired in ──────────────
+      if (this.paymentService && orderId) {
+        const baseUrl = process.env.GATEWAY_PUBLIC_URL?.replace(/\/$/, '')
+          ?? `http://localhost:${process.env.PORT ?? process.env.GATEWAY_PORT ?? 3002}`;
+
+        try {
+          const payment = await this.paymentService.initiatePayment({
+            orderId,
+            storeSlug:   slug,
+            buyerRef:    String(userId),
+            amount:      total,
+            currency:    'PHP',
+            description: `Order #${orderId} — ${slug}`,
+            buyerEmail:  state.email,
+            baseUrl,
+          });
+
+          if (payment.status === 'paid') {
+            // Mock gateway — confirmed instantly, no redirect needed
+            await ctx.editMessageText(
+              orderConfirmation(orderId, items, total),
+              { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+            );
+          } else if (payment.paymentUrl) {
+            // Real gateway — send payment link
+            const payKb = new InlineKeyboard()
+              .url('💳 Pay Now', payment.paymentUrl)
+              .row()
+              .text('🏠 Back to store', `bk:${slug}`);
+
+            await ctx.editMessageText(
+              `✅ <b>Order #${orderId} placed!</b>\n\n` +
+              `Please complete your payment of <b>${price(total)}</b> using the button below.\n\n` +
+              `<i>You'll receive a confirmation message once payment is verified.</i>`,
+              { parse_mode: 'HTML', reply_markup: payKb },
+            );
+          } else {
+            // Fallback: payment initiated but no URL
+            await ctx.editMessageText(
+              orderConfirmation(orderId, items, total),
+              { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+            );
+          }
+          return;
+        } catch (payErr) {
+          this.logger.error(`Payment initiation failed for order ${orderId}: ${payErr}`);
+          // Fall through — show order confirmation without payment
+        }
+      }
+
+      // Fallback if no payment service or payment failed to initiate
       await ctx.editMessageText(
         orderConfirmation(orderId, items, total),
         { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
@@ -752,6 +806,41 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         '❌ Sorry, there was an error placing your order. Please try again.',
         { reply_markup: backKeyboard(slug) },
       );
+    }
+  }
+
+  // ─── Notify user of payment status (called by WebhookController) ────────────
+  async notifyPaymentStatus(params: {
+    buyerRef:    string;
+    storeSlug:   string;
+    orderId:     number;
+    status:      'paid' | 'failed';
+    referenceId: string;
+  }): Promise<void> {
+    if (!this.bot) return;
+
+    const chatId = parseInt(params.buyerRef, 10);
+    if (!chatId || isNaN(chatId)) return;
+
+    try {
+      if (params.status === 'paid') {
+        await this.bot.api.sendMessage(
+          chatId,
+          `✅ <b>Payment confirmed!</b>\n\nOrder #${params.orderId} has been paid successfully.\n` +
+          `Reference: <code>${esc(params.referenceId)}</code>`,
+          { parse_mode: 'HTML' },
+        );
+      } else {
+        const retryKb = new InlineKeyboard().text('🔄 Try again', `s:${params.storeSlug}`);
+        await this.bot.api.sendMessage(
+          chatId,
+          `❌ <b>Payment failed</b>\n\nWe couldn't process payment for Order #${params.orderId}.\n` +
+          `Please try again or contact the store for assistance.`,
+          { parse_mode: 'HTML', reply_markup: retryKb },
+        );
+      }
+    } catch (err) {
+      this.logger.error(`notifyPaymentStatus failed for user ${chatId}: ${err}`);
     }
   }
 

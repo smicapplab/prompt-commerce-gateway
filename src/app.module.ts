@@ -8,6 +8,8 @@ import { MailModule } from './mail/mail.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { SettingsModule } from './settings/settings.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { PaymentModule } from './payments/payment.module';
+import { WebhookModule } from './payments/webhook.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { CatalogModule } from './catalog/catalog.module';
     TelegramModule,
     SettingsModule,
     CatalogModule,
+    PaymentModule,
+    WebhookModule,
   ],
 })
 export class AppModule {}

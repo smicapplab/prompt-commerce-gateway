@@ -22,9 +22,20 @@ async function bootstrap(): Promise<void> {
   const httpAdapter = app.getHttpAdapter();
   const expressApp = httpAdapter.getInstance();
 
-  // Apply JSON parsing only to non-MCP routes (like /api/* for admin)
+  // Apply JSON parsing selectively:
+  //   /webhooks/*  → preserve raw body for signature verification (HMAC)
+  //   /api/*       → standard JSON parsing
+  //   everything else → no body parsing (MCP SSE streams, etc.)
   expressApp.use((req: any, res: any, next: any) => {
-    if (req.path.startsWith('/api')) {
+    if (req.path.startsWith('/webhooks/')) {
+      // Capture raw body AND parse JSON; raw body needed for HMAC signature check
+      express.json({
+        limit: '1mb',
+        verify: (reqInner: any, _res: any, buf: Buffer) => {
+          reqInner.rawBody = buf;
+        },
+      })(req, res, next);
+    } else if (req.path.startsWith('/api')) {
       express.json({ limit: '10mb' })(req, res, next);
     } else {
       next();

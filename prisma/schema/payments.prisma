@@ -1,0 +1,22 @@
+// ─── Payments ─────────────────────────────────────────────────────────────────
+// One row per payment attempt. Created when checkout is initiated;
+// status updated when the provider webhooks back (or immediately for mock).
+
+model Payment {
+  id           Int      @id @default(autoincrement())
+  referenceId  String   @unique @map("reference_id") // provider's transaction ID
+  storeSlug    String   @map("store_slug")
+  orderId      Int      @map("order_id")              // seller-side SQLite order ID
+  buyerRef     String   @map("buyer_ref")             // Telegram userId (as string)
+  amount       Float                                  // total in major currency units (e.g. 1500.00)
+  currency     String   @default("PHP")
+  provider     String                                 // mock | paymongo | stripe
+  status       String   @default("pending")           // pending | paid | failed
+  paymentUrl   String?  @map("payment_url")           // redirect URL for real gateways
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt      @map("updated_at")
+
+  @@index([storeSlug])
+  @@index([buyerRef])
+  @@map("payments")
+}

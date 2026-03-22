@@ -4,9 +4,11 @@ import { AiChatService } from './ai-chat.service';
 import { RegistryModule } from '../registry/registry.module';
 import { SettingsModule } from '../settings/settings.module';
 import { CatalogModule } from '../catalog/catalog.module';
+import { PaymentModule } from '../payments/payment.module';
 
 @Module({
-  imports: [RegistryModule, SettingsModule, CatalogModule],
+  imports:   [RegistryModule, SettingsModule, CatalogModule, PaymentModule],
   providers: [TelegramService, AiChatService],
+  exports:   [TelegramService],
 })
 export class TelegramModule {}

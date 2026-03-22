@@ -25,6 +25,16 @@ model Retailer {
   aiModel        String? @map("ai_model")
   aiSystemPrompt String? @map("ai_system_prompt")
 
+  // ── Per-store payment config ───────────────────────────────────────────────
+  // paymentProvider: "mock" | "paymongo" | "stripe"
+  // paymentApiKey:   secret key for the provider (never returned to client)
+  // paymentPublicKey: public/publishable key (PayMongo pk_xxx, Stripe pk_xxx)
+  // paymentWebhookSecret: used to verify incoming webhook signatures
+  paymentProvider      String? @map("payment_provider")
+  paymentApiKey        String? @map("payment_api_key")
+  paymentPublicKey     String? @map("payment_public_key")
+  paymentWebhookSecret String? @map("payment_webhook_secret")
+
   platformKey PlatformKey?
   auditLogs   AuditLog[]
 

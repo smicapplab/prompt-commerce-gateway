@@ -100,6 +100,60 @@ export class CatalogController {
     return { hasApiKey: !!retailer.aiApiKey };
   }
 
+  // ── PATCH /api/stores/:slug/payment-config ─────────────────────────────
+  /**
+   * Pushed by the seller when the store owner updates their payment settings.
+   * Updates paymentProvider, paymentApiKey, paymentPublicKey, paymentWebhookSecret.
+   * Secret keys are stored but never returned to the client.
+   *
+   * Auth: x-gateway-key header
+   * Body: { paymentProvider, paymentApiKey, paymentPublicKey, paymentWebhookSecret }
+   */
+  @Patch(':slug/payment-config')
+  async setPaymentConfig(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+    @Body() body: {
+      paymentProvider?:      string | null;
+      paymentApiKey?:        string | null;
+      paymentPublicKey?:     string | null;
+      paymentWebhookSecret?: string | null;
+    },
+  ) {
+    // Cast to any until prisma generate picks up the new payment columns
+    const retailer = await this.validateKey(slug, platformKey) as any;
+
+    await this.registry.update(retailer.id, {
+      paymentProvider:      body.paymentProvider      ?? null,
+      paymentApiKey:        body.paymentApiKey        ?? null,
+      paymentPublicKey:     body.paymentPublicKey     ?? null,
+      paymentWebhookSecret: body.paymentWebhookSecret ?? null,
+    });
+
+    return { message: `Payment config updated for "${slug}".` };
+  }
+
+  // ── GET /api/stores/:slug/payment-config/status ────────────────────────
+  /**
+   * Returns the payment provider and whether credentials are configured.
+   * Public key is returned (safe to share); secret key is never exposed.
+   * Auth: x-gateway-key header.
+   */
+  @Get(':slug/payment-config/status')
+  async getPaymentConfigStatus(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+  ) {
+    // Cast to any until prisma generate picks up the new payment columns
+    const retailer = await this.validateKey(slug, platformKey) as any;
+    return {
+      provider:     retailer.paymentProvider  ?? 'mock',
+      hasApiKey:    !!retailer.paymentApiKey,
+      hasPublicKey: !!retailer.paymentPublicKey,
+      publicKey:    retailer.paymentPublicKey  ?? null,
+    };
+  }
+
   // ── GET /api/stores/:slug/sync/status ─────────────────────────────────
   /**
    * Returns whether the store has been synced and when.
