@@ -10,9 +10,10 @@ import { callRetailerTool, type RetailerTarget } from '../mcp/retailer-client';
 
 // ─── Store AI config (read from Retailer row) ────────────────────────────────
 export interface StoreAiConfig {
-  provider: 'claude' | 'gemini';
-  apiKey: string;
-  model?: string | null;
+  provider:     'claude' | 'gemini';
+  apiKey:       string;
+  model?:       string | null;
+  systemPrompt?: string | null;  // custom persona set by the store owner
 }
 
 const DEFAULT_MODELS: Record<string, string> = {
@@ -126,7 +127,7 @@ export class AiChatService {
     const history = histories.get(histKey) ?? [];
     history.push({ role: 'user', content: userMessage });
 
-    const system =
+    const system = config.systemPrompt?.trim() ||
       `You are a friendly shopping assistant for "${storeName}". ` +
       `Help customers find products, answer questions about pricing, stock, and promotions. ` +
       `Use your tools to look up real store data. Format responses concisely for Telegram. ` +
@@ -183,7 +184,7 @@ export class AiChatService {
     const genAI = new GoogleGenerativeAI(config.apiKey);
     const model = genAI.getGenerativeModel({
       model: config.model ?? DEFAULT_MODELS.gemini,
-      systemInstruction:
+      systemInstruction: config.systemPrompt?.trim() ||
         `You are a friendly shopping assistant for "${storeName}". ` +
         `Help customers find products, answer questions about pricing, stock, and promotions. ` +
         `Use your tools to look up real store data. Format responses concisely for Telegram. ` +

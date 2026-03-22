@@ -799,7 +799,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const provider = (store.aiProvider ?? 'gemini') as 'claude' | 'gemini';
     const apiKey   = store.aiApiKey ?? null;
     if (!apiKey) return null;
-    return { provider, apiKey, model: store.aiModel };
+    return {
+      provider,
+      apiKey,
+      model:        store.aiModel        ?? null,
+      systemPrompt: store.aiSystemPrompt ?? null,
+    };
   }
 
   // ─── Helper: resolve retailer target ───────────────────────────────────────

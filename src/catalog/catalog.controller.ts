@@ -57,26 +57,47 @@ export class CatalogController {
   // ── PATCH /api/stores/:slug/ai-config ──────────────────────────────────
   /**
    * Pushed by the seller when the store owner updates their AI settings.
-   * Updates aiProvider, aiApiKey, aiModel on the Retailer row.
+   * Updates aiProvider, aiApiKey, aiModel, aiSystemPrompt on the Retailer row.
    *
    * Auth: x-gateway-key header (seller's platform key)
-   * Body: { aiProvider, aiApiKey, aiModel }
+   * Body: { aiProvider, aiApiKey, aiModel, aiSystemPrompt }
    */
   @Patch(':slug/ai-config')
   async setAiConfig(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: { aiProvider?: string; aiApiKey?: string; aiModel?: string },
+    @Body() body: {
+      aiProvider?:     string;
+      aiApiKey?:       string;
+      aiModel?:        string;
+      aiSystemPrompt?: string;
+    },
   ) {
     const retailer = await this.validateKey(slug, platformKey);
 
     await this.registry.update(retailer.id, {
-      aiProvider: body.aiProvider ?? null,
-      aiApiKey:   body.aiApiKey   ?? null,
-      aiModel:    body.aiModel    ?? null,
+      aiProvider:     body.aiProvider     ?? null,
+      aiApiKey:       body.aiApiKey       ?? null,
+      aiModel:        body.aiModel        ?? null,
+      aiSystemPrompt: body.aiSystemPrompt ?? null,
     });
 
     return { message: `AI config updated for "${slug}".` };
+  }
+
+  // ── GET /api/stores/:slug/ai-config/status ─────────────────────────────
+  /**
+   * Used by the seller UI to verify the last push was received.
+   * Returns { hasApiKey: boolean } — true if this store has an AI key stored.
+   * Auth: x-gateway-key header.
+   */
+  @Get(':slug/ai-config/status')
+  async getAiConfigStatus(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+  ) {
+    const retailer = await this.validateKey(slug, platformKey);
+    return { hasApiKey: !!retailer.aiApiKey };
   }
 
   // ── GET /api/stores/:slug/sync/status ─────────────────────────────────

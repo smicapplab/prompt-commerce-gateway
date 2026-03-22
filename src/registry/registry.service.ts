@@ -25,9 +25,10 @@ export interface UpdateRetailerDto {
   verified?: boolean;
   active?: boolean;
   // AI assistant config for the Telegram bot
-  aiProvider?: string | null;
-  aiApiKey?: string | null;
-  aiModel?: string | null;
+  aiProvider?:     string | null;
+  aiApiKey?:       string | null;
+  aiModel?:        string | null;
+  aiSystemPrompt?: string | null;
 }
 
 @Injectable()

@@ -13,14 +13,17 @@ model Retailer {
 
   // ── Per-store AI config (powers Telegram bot AI assistant) ────────────────
   // Set automatically when seller saves AI settings (pushed via platform key).
-  // aiProvider: "gemini" | "claude"
-  // aiApiKey:   provider API key stored in DB (not in .env)
-  // aiModel:    optional override; defaults to provider's recommended model
-  //             Claude default: claude-haiku-4-5-20251001
-  //             Gemini default: gemini-1.5-flash
-  aiProvider String? @map("ai_provider")
-  aiApiKey   String? @map("ai_api_key")
-  aiModel    String? @map("ai_model")
+  // aiProvider:     "gemini" | "claude"
+  // aiApiKey:       provider API key stored in DB (not in .env)
+  // aiModel:        optional override; defaults to provider's recommended model
+  //                 Claude default: claude-haiku-4-5-20251001
+  //                 Gemini default: gemini-1.5-flash
+  // aiSystemPrompt: custom persona / instructions the store owner wrote; if
+  //                 null the bot falls back to a sensible default.
+  aiProvider     String? @map("ai_provider")
+  aiApiKey       String? @map("ai_api_key")
+  aiModel        String? @map("ai_model")
+  aiSystemPrompt String? @map("ai_system_prompt")
 
   platformKey PlatformKey?
   auditLogs   AuditLog[]
