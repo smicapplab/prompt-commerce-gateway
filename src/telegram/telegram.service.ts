@@ -35,7 +35,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   // Per-user session maps (in-memory)
   private checkoutSessions = new Map<number, CheckoutState>();
-  private aiSessions = new Map<number, AiState>();
+  private aiSessions       = new Map<number, AiState>();
+  private searchQueries    = new Map<number, string>();  // userId → last search query
 
   constructor(
     private readonly registry: RegistryService,
@@ -58,6 +59,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
     this.bot = new Bot(token);
     this.registerHandlers();
+    // Register command menu shown in Telegram UI
+    await this.bot.api.setMyCommands([
+      { command: 'search',  description: 'Search products across all stores' },
+      { command: 'stores',  description: 'Browse stores' },
+      { command: 'cart',    description: 'View your cart' },
+      { command: 'help',    description: 'Show help' },
+    ]);
     this.bot.start({ onStart: () => this.logger.log('Telegram bot started.') });
   }
 
@@ -115,15 +123,27 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.sendCart(ctx, userId, slug);
     });
 
+    // ── /search ────────────────────────────────────────────────────────────
+    bot.command('search', async (ctx) => {
+      const query = ctx.match?.trim();
+      if (!query) {
+        await ctx.reply('What are you looking for?\n\nSend me a product name, e.g. <b>/search sneakers</b>', { parse_mode: 'HTML' });
+        return;
+      }
+      const userId = ctx.from?.id;
+      if (userId) this.searchQueries.set(userId, query);
+      await this.sendSearchResults(ctx, query, 0);
+    });
+
     // ── /help ──────────────────────────────────────────────────────────────
     bot.command('help', async (ctx) => {
       await ctx.reply(
         '<b>Prompt Commerce Bot</b>\n\n' +
-        '/start — Welcome &amp; store list\n' +
-        '/stores — Browse stores\n' +
+        '/search &lt;keyword&gt; — Search products across all stores\n' +
+        '/stores — Browse by store\n' +
         '/cart — View your cart\n' +
         '/help — This message\n\n' +
-        'Use the buttons to browse products or tap <b>Ask AI Assistant</b> to chat naturally.',
+        'Or just type any product name to search instantly.',
         { parse_mode: 'HTML' },
       );
     });
@@ -252,6 +272,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
+        // srch:<offset> — paginate cross-store search results
+        if (data.startsWith('srch:')) {
+          const offset = parseInt(data.slice(5)) || 0;
+          const query  = this.searchQueries.get(userId);
+          if (!query) { await ctx.reply('Search expired. Send /search again.'); return; }
+          await this.sendSearchResults(ctx, query, offset, true);
+          return;
+        }
+
       } catch (err) {
         this.logger.error(`Callback error [${data}]: ${err}`);
         await ctx.reply('Something went wrong. Please try again.');
@@ -279,16 +308,65 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      // Default — nudge to use buttons
-      await ctx.reply(
-        'Use /start to browse stores or /stores to pick one.',
-      );
+      // Default — treat free text as a product search across all stores
+      if (userId) this.searchQueries.set(userId, text);
+      await this.sendSearchResults(ctx, text, 0);
     });
 
     // ── Error handler ──────────────────────────────────────────────────────
     bot.catch((err) => {
       this.logger.error('Bot error:', err);
     });
+  }
+
+  // ─── Cross-store product search ─────────────────────────────────────────────
+  private async sendSearchResults(
+    ctx: any,
+    query: string,
+    offset: number,
+    edit = false,
+  ): Promise<void> {
+    const PAGE = 8;
+    const [results, total] = await Promise.all([
+      this.catalog.searchAllStores(query, { limit: PAGE, offset }),
+      this.catalog.countSearchAllStores(query),
+    ]);
+
+    if (!results.length && offset === 0) {
+      const msg = `🔍 No products found for <b>${esc(query)}</b>.\n\nTry a different keyword or browse by /stores.`;
+      if (edit) await ctx.editMessageText(msg, { parse_mode: 'HTML' });
+      else       await ctx.reply(msg, { parse_mode: 'HTML' });
+      return;
+    }
+
+    // Build result lines grouped by store
+    const lines: string[] = [
+      `🔍 <b>${esc(query)}</b> — ${total} result${total !== 1 ? 's' : ''} across all stores\n`,
+    ];
+    for (const p of results) {
+      const priceStr = p.price != null ? `₱${p.price.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : 'Price TBD';
+      const stock    = p.stockQuantity > 0 ? '' : ' <i>(out of stock)</i>';
+      lines.push(`• <b>${esc(p.title)}</b>${stock}\n  ${priceStr} — <i>${esc(p.storeSlug)}</i>`);
+    }
+
+    // Pagination keyboard
+    const keyboard = new InlineKeyboard();
+    const hasPrev = offset > 0;
+    const hasNext = offset + PAGE < total;
+    if (hasPrev) keyboard.text('← Prev', `srch:${offset - PAGE}`);
+    if (hasNext) keyboard.text('Next →', `srch:${offset + PAGE}`);
+    // "View in store" buttons for each result on this page
+    keyboard.row();
+    for (const p of results) {
+      keyboard.text(`🛒 ${p.title.slice(0, 20)}`, `p:${p.storeSlug}:${p.sellerId}`).row();
+    }
+
+    const text = lines.join('\n');
+    if (edit) {
+      await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard });
+    } else {
+      await ctx.reply(text, { parse_mode: 'HTML', reply_markup: keyboard });
+    }
   }
 
   // ─── Send categories ────────────────────────────────────────────────────────

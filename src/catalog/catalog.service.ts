@@ -172,6 +172,42 @@ export class CatalogService {
     });
   }
 
+  // ── Cross-store search ────────────────────────────────────────────────────
+  async searchAllStores(
+    query: string,
+    opts: { limit?: number; offset?: number } = {},
+  ) {
+    const { limit = 20, offset = 0 } = opts;
+    return this.prisma.cachedProduct.findMany({
+      where: {
+        active: true,
+        OR: [
+          { title:       { contains: query, mode: 'insensitive' } },
+          { description: { contains: query, mode: 'insensitive' } },
+          { sku:         { contains: query, mode: 'insensitive' } },
+          { tags:        { has: query } },
+        ],
+      },
+      orderBy: [{ price: 'asc' }, { title: 'asc' }],
+      take: limit,
+      skip: offset,
+    });
+  }
+
+  async countSearchAllStores(query: string): Promise<number> {
+    return this.prisma.cachedProduct.count({
+      where: {
+        active: true,
+        OR: [
+          { title:       { contains: query, mode: 'insensitive' } },
+          { description: { contains: query, mode: 'insensitive' } },
+          { sku:         { contains: query, mode: 'insensitive' } },
+          { tags:        { has: query } },
+        ],
+      },
+    });
+  }
+
   async isSynced(storeSlug: string): Promise<boolean> {
     const count = await this.prisma.cachedProduct.count({ where: { storeSlug } });
     return count > 0;
