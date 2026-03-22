@@ -57,10 +57,10 @@ export class CatalogController {
   // ── PATCH /api/stores/:slug/ai-config ──────────────────────────────────
   /**
    * Pushed by the seller when the store owner updates their AI settings.
-   * Updates aiProvider, aiApiKey, aiModel, aiSystemPrompt on the Retailer row.
+   * Updates aiProvider, aiApiKey, aiModel, aiSystemPrompt, serperApiKey on the Retailer row.
    *
    * Auth: x-gateway-key header (seller's platform key)
-   * Body: { aiProvider, aiApiKey, aiModel, aiSystemPrompt }
+   * Body: { aiProvider, aiApiKey, aiModel, aiSystemPrompt, serperApiKey }
    */
   @Patch(':slug/ai-config')
   async setAiConfig(
@@ -71,6 +71,7 @@ export class CatalogController {
       aiApiKey?:       string;
       aiModel?:        string;
       aiSystemPrompt?: string;
+      serperApiKey?:   string;
     },
   ) {
     const retailer = await this.validateKey(slug, platformKey);
@@ -80,6 +81,7 @@ export class CatalogController {
       aiApiKey:       body.aiApiKey       ?? null,
       aiModel:        body.aiModel        ?? null,
       aiSystemPrompt: body.aiSystemPrompt ?? null,
+      serperApiKey:   body.serperApiKey   ?? null,
     });
 
     return { message: `AI config updated for "${slug}".` };

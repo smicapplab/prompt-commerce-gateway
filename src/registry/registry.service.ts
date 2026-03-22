@@ -29,6 +29,7 @@ export interface UpdateRetailerDto {
   aiApiKey?:       string | null;
   aiModel?:        string | null;
   aiSystemPrompt?: string | null;
+  serperApiKey?:   string | null;
   // Payment gateway config
   paymentProvider?:      string | null;
   paymentApiKey?:        string | null;

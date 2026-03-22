@@ -24,6 +24,7 @@ model Retailer {
   aiApiKey       String? @map("ai_api_key")
   aiModel        String? @map("ai_model")
   aiSystemPrompt String? @map("ai_system_prompt")
+  serperApiKey   String? @map("serper_api_key")
 
   // ── Per-store payment config ───────────────────────────────────────────────
   // paymentProvider: "mock" | "paymongo" | "stripe"

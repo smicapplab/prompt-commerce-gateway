@@ -885,14 +885,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Resolve per-store AI config ────────────────────────────────────────────
   private resolveAiConfig(store: any): StoreAiConfig | null {
-    const provider = (store.aiProvider ?? 'gemini') as 'claude' | 'gemini';
+    const provider = (store.aiProvider ?? 'claude') as 'claude' | 'gemini' | 'openai';
     const apiKey   = store.aiApiKey ?? null;
     if (!apiKey) return null;
     return {
       provider,
       apiKey,
-      model:        store.aiModel        ?? null,
-      systemPrompt: store.aiSystemPrompt ?? null,
+      model:         store.aiModel        ?? null,
+      systemPrompt:  store.aiSystemPrompt ?? null,
+      serperApiKey:  store.serperApiKey   ?? null,
     };
   }
 
