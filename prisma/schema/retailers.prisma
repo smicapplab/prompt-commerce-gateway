@@ -1,0 +1,55 @@
+// ─── Registered retailers ─────────────────────────────────────────────────────
+model Retailer {
+  id                Int      @id @default(autoincrement())
+  slug              String   @unique
+  name              String   @unique
+  contactEmail      String   @map("contact_email")
+  mcpServerUrl      String   @map("mcp_server_url")
+  businessPermitUrl String?  @map("business_permit_url")
+  verified          Boolean  @default(false)
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // ── Per-store AI config (powers Telegram bot AI assistant) ────────────────
+  // Set automatically when seller saves AI settings (pushed via platform key).
+  // aiProvider: "gemini" | "claude"
+  // aiApiKey:   provider API key stored in DB (not in .env)
+  // aiModel:    optional override; defaults to provider's recommended model
+  //             Claude default: claude-haiku-4-5-20251001
+  //             Gemini default: gemini-1.5-flash
+  aiProvider String? @map("ai_provider")
+  aiApiKey   String? @map("ai_api_key")
+  aiModel    String? @map("ai_model")
+
+  platformKey PlatformKey?
+  auditLogs   AuditLog[]
+
+  @@map("retailers")
+}
+
+// ─── Platform keys (one active key per retailer) ──────────────────────────────
+model PlatformKey {
+  id         Int       @id @default(autoincrement())
+  retailerId Int       @unique @map("retailer_id")
+  key        String    @unique
+  issuedAt   DateTime  @default(now()) @map("issued_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  retailer Retailer @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+
+  @@map("platform_keys")
+}
+
+// ─── Audit log (key events) ───────────────────────────────────────────────────
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  retailerId Int      @map("retailer_id")
+  event      String
+  meta       Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  retailer Retailer @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}

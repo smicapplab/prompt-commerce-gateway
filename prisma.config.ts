@@ -19,7 +19,7 @@ config({ path: resolve(__dirname, '.env'), quiet: true });
  * via the adapter passed to new PrismaClient() in prisma.module.ts.
  */
 export default defineConfig({
-  schema: './prisma/schema.prisma',
+  schema: './prisma/schema',
   datasource: {
     url: process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL,
   },

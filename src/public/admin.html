@@ -77,6 +77,13 @@
           <line x1="3" y1="18" x2="3.01" y2="18"></line>
         </svg>All Retailers
       </a>
+      <a href="#" data-tab="settings">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>Settings
+      </a>
       <div class="spacer"></div>
       <button class="logout-btn" id="logoutBtn">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -110,23 +117,60 @@
       </div>
 
       <!-- Retailers table -->
-      <div class="card">
-        <table>
-          <thead>
-            <tr>
-              <th>Store</th>
-              <th>MCP URL</th>
-              <th>Email</th>
-              <th>Permit</th>
-              <th>Status</th>
-              <th>Key</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="retailersTable">
-            <tr><td colspan="7" style="color:var(--muted)">Loading…</td></tr>
-          </tbody>
-        </table>
+      <div id="panelRetailers">
+        <div class="card">
+          <table>
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>MCP URL</th>
+                <th>Email</th>
+                <th>Permit</th>
+                <th>Status</th>
+                <th>Key</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="retailersTable">
+              <tr><td colspan="7" style="color:var(--muted)">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Settings panel -->
+      <div id="panelSettings" style="display:none;">
+        <div class="card" style="max-width:600px;">
+          <div class="card-title">Gateway Settings</div>
+          <p style="font-size:0.85rem;color:var(--muted);margin-bottom:1.5rem;">
+            Global settings for this gateway instance. These apply to all stores.
+          </p>
+
+          <!-- Telegram -->
+          <div style="margin-bottom:1.5rem;">
+            <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.75rem;display:flex;align-items:center;gap:0.5rem;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              Telegram Bot
+            </div>
+            <div class="form-group">
+              <label>Bot Token <span id="tgTokenStatus" style="font-size:0.75rem;font-weight:400;"></span></label>
+              <div class="password-group">
+                <input id="tgToken" type="password" placeholder="Paste new token to set / replace…" autocomplete="off" />
+                <span class="toggle-password" id="tgTokenToggle">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="eye-icon"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </span>
+              </div>
+              <div style="font-size:0.75rem;color:var(--muted);margin-top:0.35rem;">
+                Get this from <a href="https://t.me/BotFather" target="_blank" style="color:var(--primary);">@BotFather</a> on Telegram. Leave blank to keep the existing token.
+              </div>
+            </div>
+          </div>
+
+          <div id="settingsSaved" style="display:none;font-size:0.85rem;color:var(--success);margin-bottom:1rem;">✓ Settings saved.</div>
+          <div id="settingsError" style="display:none;" class="alert alert-error"></div>
+
+          <button class="btn btn-primary" id="saveSettingsBtn" onclick="saveSettings()">Save settings</button>
+        </div>
       </div>
     </main>
   </div>
@@ -156,6 +200,8 @@
     function showAdmin() {
       document.getElementById('loginWrap').style.display = 'none';
       document.getElementById('adminWrap').style.display = 'grid';
+      document.getElementById('panelRetailers').style.display = '';
+      document.getElementById('panelSettings').style.display = 'none';
       loadRetailers();
     }
 
@@ -210,11 +256,18 @@
     }
 
     setupPasswordToggle('lPass', 'lPassToggle');
+    setupPasswordToggle('tgToken', 'tgTokenToggle');
 
     document.getElementById('logoutBtn').addEventListener('click', logout);
 
     // ── Tabs ──────────────────────────────────────────────────────────────────
-    const tabTitles = { pending: 'Pending Verification', verified: 'Verified Retailers', all: 'All Retailers' };
+    const tabTitles = {
+      pending: 'Pending Verification',
+      verified: 'Verified Retailers',
+      all: 'All Retailers',
+      settings: 'Settings',
+    };
+
     document.querySelectorAll('.sidebar a[data-tab]').forEach(link => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
@@ -222,9 +275,66 @@
         document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
         link.classList.add('active');
         document.getElementById('pageTitle').textContent = tabTitles[currentTab];
-        loadRetailers();
+
+        // Show/hide panels
+        document.getElementById('panelRetailers').style.display = currentTab === 'settings' ? 'none' : '';
+        document.getElementById('keyBanner').style.display = 'none';
+        document.getElementById('panelSettings').style.display = currentTab === 'settings' ? '' : 'none';
+
+        if (currentTab === 'settings') loadSettings();
+        else loadRetailers();
       });
     });
+
+    // ── Settings ──────────────────────────────────────────────────────────────
+    async function loadSettings() {
+      const savedEl  = document.getElementById('settingsSaved');
+      const errorEl  = document.getElementById('settingsError');
+      const statusEl = document.getElementById('tgTokenStatus');
+      savedEl.style.display = 'none';
+      errorEl.style.display = 'none';
+
+      // Use GET /api/settings/:key to avoid exposing the raw token value in a list
+      const tg = await api('GET', '/api/settings/telegram_bot_token');
+
+      if (tg && tg.value) {
+        statusEl.textContent = '✓ token saved';
+        statusEl.style.color = 'var(--success)';
+        document.getElementById('tgToken').placeholder = 'Paste new token to replace…';
+      } else {
+        statusEl.textContent = 'not set';
+        statusEl.style.color = 'var(--muted)';
+        document.getElementById('tgToken').placeholder = '123456:ABC-DEF…';
+      }
+    }
+
+    async function saveSettings() {
+      const savedEl = document.getElementById('settingsSaved');
+      const errorEl = document.getElementById('settingsError');
+      const btn     = document.getElementById('saveSettingsBtn');
+      savedEl.style.display = 'none';
+      errorEl.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      try {
+        const tgToken = document.getElementById('tgToken').value.trim();
+        if (tgToken) {
+          await api('PUT', '/api/settings/telegram_bot_token', { value: tgToken });
+        }
+
+        document.getElementById('tgToken').value = '';
+        savedEl.style.display = 'block';
+        setTimeout(() => (savedEl.style.display = 'none'), 4000);
+        loadSettings(); // refresh status badge
+      } catch (err) {
+        errorEl.textContent = err.message ?? 'Save failed';
+        errorEl.style.display = 'block';
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Save settings';
+    }
 
     // ── Retailers ─────────────────────────────────────────────────────────────
     async function loadRetailers() {

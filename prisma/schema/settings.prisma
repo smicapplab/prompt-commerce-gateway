@@ -1,0 +1,13 @@
+// ─── Gateway-level key-value settings ─────────────────────────────────────────
+// Managed via GET/PUT /api/settings/:key (admin-guarded).
+//
+// Reserved keys:
+//   telegram_bot_token   — BotFather token for the customer Telegram bot
+//
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}

@@ -1,0 +1,9 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection URLs live in prisma.config.ts (Prisma 7 requirement).
+  // See prisma.config.ts for local vs Supabase URL configuration.
+}

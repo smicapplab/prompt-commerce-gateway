@@ -1,0 +1,9 @@
+// ─── Admin users (gateway operators) ─────────────────────────────────────────
+model AdminUser {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("admin_users")
+}

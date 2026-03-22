@@ -5,6 +5,9 @@ import { KeysModule } from './keys/keys.module';
 import { RegistryModule } from './registry/registry.module';
 import { McpModule } from './mcp/mcp.module';
 import { MailModule } from './mail/mail.module';
+import { TelegramModule } from './telegram/telegram.module';
+import { SettingsModule } from './settings/settings.module';
+import { CatalogModule } from './catalog/catalog.module';
 
 @Module({
   imports: [
@@ -14,6 +17,9 @@ import { MailModule } from './mail/mail.module';
     RegistryModule,
     McpModule,
     MailModule,
+    TelegramModule,
+    SettingsModule,
+    CatalogModule,
   ],
 })
 export class AppModule {}

@@ -1,0 +1,43 @@
+// ─── Cached catalog (synced on-demand from seller) ────────────────────────────
+//
+// The seller pushes a snapshot of their products + categories to the gateway
+// via POST /api/stores/:slug/sync (authenticated with the platform key).
+// The Telegram bot reads from these tables instead of calling the seller's
+// MCP server on every button press, reducing latency and seller dependency.
+//
+// Sync is triggered manually from the seller admin UI (Sync to Gateway button).
+// The full snapshot replaces existing rows for that store on every sync.
+
+model CachedCategory {
+  id        Int      @id @default(autoincrement())
+  storeSlug String   @map("store_slug")
+  sellerId  Int      @map("seller_id")   // category ID in seller's SQLite DB
+  name      String
+  parentId  Int?     @map("parent_id")   // seller's parent category ID (not FK)
+  syncedAt  DateTime @default(now()) @map("synced_at")
+
+  @@unique([storeSlug, sellerId])
+  @@index([storeSlug])
+  @@map("cached_categories")
+}
+
+model CachedProduct {
+  id            Int      @id @default(autoincrement())
+  storeSlug     String   @map("store_slug")
+  sellerId      Int      @map("seller_id")   // product ID in seller's SQLite DB
+  title         String
+  description   String?
+  sku           String?
+  price         Float?
+  stockQuantity Int      @default(0) @map("stock_quantity")
+  categoryId    Int?     @map("category_id") // seller's category ID (not FK)
+  tags          String[] // Postgres native array
+  images        String[] // Postgres native array
+  active        Boolean  @default(true)
+  syncedAt      DateTime @default(now()) @map("synced_at")
+
+  @@unique([storeSlug, sellerId])
+  @@index([storeSlug])
+  @@index([storeSlug, categoryId])
+  @@map("cached_products")
+}
