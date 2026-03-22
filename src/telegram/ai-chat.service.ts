@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
   GoogleGenerativeAI,
   type FunctionDeclaration,
+  type Schema,
   SchemaType,
 } from '@google/generative-ai';
 import { callRetailerTool, type RetailerTarget } from '../mcp/retailer-client';
@@ -71,16 +72,14 @@ const GEMINI_TOOLS: FunctionDeclaration[] = TOOL_SPECS.map(t => ({
   parameters: {
     type: SchemaType.OBJECT,
     properties: Object.fromEntries(
-      Object.entries(t.properties).map(([k, v]) => [
-        k,
-        {
-          type: (v as any).type === 'integer' ? SchemaType.INTEGER
-              : (v as any).type === 'number'  ? SchemaType.NUMBER
-              : SchemaType.STRING,
-          description: (v as any).description,
-        },
-      ])
-    ),
+      Object.entries(t.properties).map(([k, v]) => {
+        const schemaType =
+          (v as any).type === 'integer' ? SchemaType.INTEGER
+          : (v as any).type === 'number'  ? SchemaType.NUMBER
+          : SchemaType.STRING;
+        return [k, { type: schemaType, description: (v as any).description } as Schema];
+      })
+    ) as Record<string, Schema>,
   },
 }));
 
