@@ -14,6 +14,82 @@ import { esc, price, productDetail, cartSummary, orderConfirmation,
 
 const PAGE_SIZE = 8;
 
+// ─── Natural-language query parser ───────────────────────────────────────────
+// Extracts price constraints and stock intent from free-form text.
+// Examples:
+//   "laptop less than 50k"   → { keywords: "laptop", maxPrice: 50000 }
+//   "shoes between 500-2000" → { keywords: "shoes", minPrice: 500, maxPrice: 2000 }
+//   "in stock headphones"    → { keywords: "headphones", inStockOnly: true }
+
+interface ParsedQuery {
+  keywords:     string;
+  maxPrice?:    number;
+  minPrice?:    number;
+  inStockOnly?: boolean;
+}
+
+function parseSearchQuery(raw: string): ParsedQuery {
+  let text = raw.trim();
+  let maxPrice: number | undefined;
+  let minPrice: number | undefined;
+  let inStockOnly = false;
+
+  // Parse "50k" / "1.5k" shorthand → numeric value
+  const toNum = (s: string): number => {
+    const n = parseFloat(s.replace(/,/g, ''));
+    return /k$/i.test(s) ? n * 1000 : n;
+  };
+
+  // ── Price range: "between X and Y" / "X to Y" / "X-Y" ──────────────────
+  const rangeRe = /\b(?:between\s+)?([\d,.]+k?)\s*(?:to|-|and)\s*([\d,.]+k?)\b/i;
+  const rangeM  = text.match(rangeRe);
+  if (rangeM) {
+    const a = toNum(rangeM[1]);
+    const b = toNum(rangeM[2]);
+    // Only treat as a price range if both numbers look like prices (not "2-in-1")
+    if (a > 0 || b > 0) {
+      minPrice = Math.min(a, b);
+      maxPrice = Math.max(a, b);
+      text = text.replace(rangeM[0], '').trim();
+    }
+  }
+
+  if (!maxPrice) {
+    // ── Max price: "less than", "under", "below", "max", "up to", "within", "≤" ──
+    const maxRe = /\b(?:less\s+than|under|below|cheaper\s+than|max(?:imum)?|at\s+most|up\s+to|within|not\s+more\s+than)\s+([\d,.]+k?)\b|[≤<]=?\s*([\d,.]+k?)/i;
+    const maxM  = text.match(maxRe);
+    if (maxM) {
+      maxPrice = toNum(maxM[1] ?? maxM[2]);
+      text = text.replace(maxM[0], '').trim();
+    }
+  }
+
+  if (!minPrice) {
+    // ── Min price: "more than", "above", "over", "min", "at least", "≥" ──
+    const minRe = /\b(?:more\s+than|above|over|min(?:imum)?|at\s+least|starting\s+(?:from|at))\s+([\d,.]+k?)\b|[≥>]=?\s*([\d,.]+k?)/i;
+    const minM  = text.match(minRe);
+    if (minM) {
+      minPrice = toNum(minM[1] ?? minM[2]);
+      text = text.replace(minM[0], '').trim();
+    }
+  }
+
+  // ── In-stock filter ──────────────────────────────────────────────────────
+  if (/\bin[\s-]?stock\b|\bavailable\b/i.test(text)) {
+    inStockOnly = true;
+    text = text.replace(/\bin[\s-]?stock\b|\bavailable\b/gi, '').trim();
+  }
+
+  // ── Strip intent words that add no search value ──────────────────────────
+  text = text
+    .replace(/\b(find\s+me|show\s+me|i\s+want|i('m)?\s+(looking\s+for|need)|get\s+me|search\s+for|looking\s+for|give\s+me)\b/gi, '')
+    .replace(/\b(a|an|the|some|any|please|cheap|cheapest|affordable)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  return { keywords: text, maxPrice, minPrice, inStockOnly };
+}
+
 // ─── Checkout session state ───────────────────────────────────────────────────
 interface CheckoutState {
   storeSlug: string;
@@ -127,7 +203,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.command('search', async (ctx) => {
       const query = ctx.match?.trim();
       if (!query) {
-        await ctx.reply('What are you looking for?\n\nSend me a product name, e.g. <b>/search sneakers</b>', { parse_mode: 'HTML' });
+        await ctx.reply(
+          'What are you looking for?\n\n' +
+          'You can search naturally, for example:\n' +
+          '  <b>/search laptop under 50k</b>\n' +
+          '  <b>/search shoes between 500 and 2000</b>\n' +
+          '  <b>/search in stock headphones</b>\n\n' +
+          'Or just type a product name directly.',
+          { parse_mode: 'HTML' },
+        );
         return;
       }
       const userId = ctx.from?.id;
@@ -139,11 +223,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.command('help', async (ctx) => {
       await ctx.reply(
         '<b>Prompt Commerce Bot</b>\n\n' +
-        '/search &lt;keyword&gt; — Search products across all stores\n' +
+        '<b>Search</b>\n' +
+        '/search &lt;query&gt; — Search across all stores\n' +
+        'You can include filters naturally:\n' +
+        '  • <i>laptop under 50k</i>\n' +
+        '  • <i>shoes between 500 and 2000</i>\n' +
+        '  • <i>in stock headphones below 3000</i>\n' +
+        '  • <i>more than 1000 bags</i>\n\n' +
+        '<b>Browse</b>\n' +
         '/stores — Browse by store\n' +
         '/cart — View your cart\n' +
         '/help — This message\n\n' +
-        'Or just type any product name to search instantly.',
+        'Or just type anything to search instantly.',
         { parse_mode: 'HTML' },
       );
     });
@@ -322,26 +413,42 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   // ─── Cross-store product search ─────────────────────────────────────────────
   private async sendSearchResults(
     ctx: any,
-    query: string,
+    rawQuery: string,
     offset: number,
     edit = false,
   ): Promise<void> {
     const PAGE = 8;
+
+    // Parse natural-language filters out of the raw query
+    const { keywords, maxPrice, minPrice, inStockOnly } = parseSearchQuery(rawQuery);
+    const filterOpts = { limit: PAGE, offset, maxPrice, minPrice, inStockOnly };
+
     const [results, total] = await Promise.all([
-      this.catalog.searchAllStores(query, { limit: PAGE, offset }),
-      this.catalog.countSearchAllStores(query),
+      this.catalog.searchAllStores(keywords, filterOpts),
+      this.catalog.countSearchAllStores(keywords, filterOpts),
     ]);
 
+    // ── Build header ────────────────────────────────────────────────────────
+    const ph = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
+    const filters: string[] = [];
+    if (keywords)                 filters.push(`<b>${esc(keywords)}</b>`);
+    if (minPrice != null && maxPrice != null)
+                                  filters.push(`${ph(minPrice)}–${ph(maxPrice)}`);
+    else if (minPrice != null)    filters.push(`from ${ph(minPrice)}`);
+    else if (maxPrice != null)    filters.push(`under ${ph(maxPrice)}`);
+    if (inStockOnly)              filters.push('in stock');
+
+    const label = filters.length ? filters.join(' · ') : 'all products';
+
     if (!results.length && offset === 0) {
-      const msg = `🔍 No products found for <b>${esc(query)}</b>.\n\nTry a different keyword or browse by /stores.`;
+      const msg = `🔍 No products found for ${label}.\n\nTry a different keyword or browse by /stores.`;
       if (edit) await ctx.editMessageText(msg, { parse_mode: 'HTML' });
       else       await ctx.reply(msg, { parse_mode: 'HTML' });
       return;
     }
 
-    // Build result lines grouped by store
     const lines: string[] = [
-      `🔍 <b>${esc(query)}</b> — ${total} result${total !== 1 ? 's' : ''} across all stores\n`,
+      `🔍 ${label} — ${total} result${total !== 1 ? 's' : ''} across all stores\n`,
     ];
     for (const p of results) {
       const priceStr = p.price != null ? `₱${p.price.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : 'Price TBD';
@@ -355,7 +462,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const hasNext = offset + PAGE < total;
     if (hasPrev) keyboard.text('← Prev', `srch:${offset - PAGE}`);
     if (hasNext) keyboard.text('Next →', `srch:${offset + PAGE}`);
-    // "View in store" buttons for each result on this page
     keyboard.row();
     for (const p of results) {
       keyboard.text(`🛒 ${p.title.slice(0, 20)}`, `p:${p.storeSlug}:${p.sellerId}`).row();

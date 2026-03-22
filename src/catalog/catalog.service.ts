@@ -175,37 +175,67 @@ export class CatalogService {
   // ── Cross-store search ────────────────────────────────────────────────────
   async searchAllStores(
     query: string,
-    opts: { limit?: number; offset?: number } = {},
+    opts: {
+      limit?:       number;
+      offset?:      number;
+      maxPrice?:    number;
+      minPrice?:    number;
+      inStockOnly?: boolean;
+    } = {},
   ) {
-    const { limit = 20, offset = 0 } = opts;
+    const { limit = 20, offset = 0, maxPrice, minPrice, inStockOnly } = opts;
     return this.prisma.cachedProduct.findMany({
-      where: {
-        active: true,
-        OR: [
-          { title:       { contains: query, mode: 'insensitive' } },
-          { description: { contains: query, mode: 'insensitive' } },
-          { sku:         { contains: query, mode: 'insensitive' } },
-          { tags:        { has: query } },
-        ],
-      },
+      where: this._buildSearchWhere(query, { maxPrice, minPrice, inStockOnly }),
       orderBy: [{ price: 'asc' }, { title: 'asc' }],
       take: limit,
       skip: offset,
     });
   }
 
-  async countSearchAllStores(query: string): Promise<number> {
+  async countSearchAllStores(
+    query: string,
+    opts: { maxPrice?: number; minPrice?: number; inStockOnly?: boolean } = {},
+  ): Promise<number> {
     return this.prisma.cachedProduct.count({
-      where: {
-        active: true,
-        OR: [
-          { title:       { contains: query, mode: 'insensitive' } },
-          { description: { contains: query, mode: 'insensitive' } },
-          { sku:         { contains: query, mode: 'insensitive' } },
-          { tags:        { has: query } },
-        ],
-      },
+      where: this._buildSearchWhere(query, opts),
     });
+  }
+
+  private _buildSearchWhere(
+    query: string,
+    opts: { maxPrice?: number; minPrice?: number; inStockOnly?: boolean },
+  ) {
+    const { maxPrice, minPrice, inStockOnly } = opts;
+
+    // Build price filter
+    const priceFilter: Record<string, number> = {};
+    if (minPrice != null) priceFilter.gte = minPrice;
+    if (maxPrice != null) priceFilter.lte = maxPrice;
+
+    // Multi-word AND search:
+    // Split "apple laptop" → ["apple", "laptop"] and require EVERY word to
+    // appear somewhere across title, description, sku, or tags.
+    // This means "apple laptop" matches "Apple MacBook Pro" if the product
+    // is tagged "laptop" (or the description mentions it), even though neither
+    // field contains the exact phrase "apple laptop".
+    const words = query.trim().split(/\s+/).filter(Boolean);
+    const textAnd = words.length
+      ? words.map((word) => ({
+          OR: [
+            { title:       { contains: word, mode: 'insensitive' as const } },
+            { description: { contains: word, mode: 'insensitive' as const } },
+            { sku:         { contains: word, mode: 'insensitive' as const } },
+            { tags:        { has: word } },
+          ],
+        }))
+      : undefined;
+
+    return {
+      active: true,
+      ...(Object.keys(priceFilter).length ? { price: priceFilter } : {}),
+      ...(inStockOnly ? { stockQuantity: { gt: 0 } } : {}),
+      ...(textAnd ? { AND: textAnd } : {}),
+    };
   }
 
   async isSynced(storeSlug: string): Promise<boolean> {
