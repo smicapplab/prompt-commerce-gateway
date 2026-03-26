@@ -1,0 +1,196 @@
+// ─── Admin users (gateway operators) ─────────────────────────────────────────
+model AdminUser {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("admin_users")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../src/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection URLs live in prisma.config.ts (Prisma 7 requirement).
+  // See prisma.config.ts for local vs Supabase URL configuration.
+}
+
+// ─── Telegram shopping carts (persisted across restarts) ─────────────────────
+// One row per (userId, storeSlug, productId) — quantity tracked in the row.
+// userId is stored as a String because Telegram user IDs are 64-bit integers
+// which exceed JavaScript's safe integer range.
+model Cart {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id") // Telegram user ID as string
+  storeSlug String   @map("store_slug")
+  productId Int      @map("product_id")
+  title     String
+  price     Float
+  quantity  Int      @default(1)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, storeSlug, productId])
+  @@index([userId, storeSlug])
+  @@map("carts")
+}
+
+// ─── Cached catalog (synced on-demand from seller) ────────────────────────────
+//
+// The seller pushes a snapshot of their products + categories to the gateway
+// via POST /api/stores/:slug/sync (authenticated with the platform key).
+// The Telegram bot reads from these tables instead of calling the seller's
+// MCP server on every button press, reducing latency and seller dependency.
+//
+// Sync is triggered manually from the seller admin UI (Sync to Gateway button).
+// The full snapshot replaces existing rows for that store on every sync.
+
+model CachedCategory {
+  id        Int      @id @default(autoincrement())
+  storeSlug String   @map("store_slug")
+  sellerId  Int      @map("seller_id") // category ID in seller's SQLite DB
+  name      String
+  parentId  Int?     @map("parent_id") // seller's parent category ID (not FK)
+  syncedAt  DateTime @default(now()) @map("synced_at")
+
+  @@unique([storeSlug, sellerId])
+  @@index([storeSlug])
+  @@map("cached_categories")
+}
+
+model CachedProduct {
+  id            Int      @id @default(autoincrement())
+  storeSlug     String   @map("store_slug")
+  sellerId      Int      @map("seller_id") // product ID in seller's SQLite DB
+  title         String
+  description   String?
+  sku           String?
+  price         Float?
+  stockQuantity Int      @default(0) @map("stock_quantity")
+  categoryId    Int?     @map("category_id") // seller's category ID (not FK)
+  tags          String[] // Postgres native array
+  images        String[] // Postgres native array
+  active        Boolean  @default(true)
+  syncedAt      DateTime @default(now()) @map("synced_at")
+
+  @@unique([storeSlug, sellerId])
+  @@index([storeSlug])
+  @@index([storeSlug, categoryId])
+  @@map("cached_products")
+}
+
+// ─── Payments ─────────────────────────────────────────────────────────────────
+// One row per payment attempt. Created when checkout is initiated;
+// status updated when the provider webhooks back (or immediately for mock).
+
+model Payment {
+  id          Int      @id @default(autoincrement())
+  referenceId String   @unique @map("reference_id") // provider's transaction ID
+  storeSlug   String   @map("store_slug")
+  orderId     Int      @map("order_id") // seller-side SQLite order ID
+  buyerRef    String   @map("buyer_ref") // Telegram userId (as string)
+  amount      Float // total in major currency units (e.g. 1500.00)
+  currency    String   @default("PHP")
+  provider    String // mock | paymongo | stripe
+  status      String   @default("pending") // pending | paid | failed
+  paymentUrl  String?  @map("payment_url") // redirect URL for real gateways
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([storeSlug])
+  @@index([buyerRef])
+  @@map("payments")
+}
+
+// ─── Registered retailers ─────────────────────────────────────────────────────
+model Retailer {
+  id                Int      @id @default(autoincrement())
+  slug              String   @unique
+  name              String   @unique
+  contactEmail      String   @map("contact_email")
+  mcpServerUrl      String   @map("mcp_server_url")
+  businessPermitUrl String?  @map("business_permit_url")
+  verified          Boolean  @default(false)
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // ── Per-store AI config (powers Telegram bot AI assistant) ────────────────
+  // Set automatically when seller saves AI settings (pushed via platform key).
+  // aiProvider:     "gemini" | "claude"
+  // aiApiKey:       provider API key stored in DB (not in .env)
+  // aiModel:        optional override; defaults to provider's recommended model
+  //                 Claude default: claude-haiku-4-5-20251001
+  //                 Gemini default: gemini-1.5-flash
+  // aiSystemPrompt: custom persona / instructions the store owner wrote; if
+  //                 null the bot falls back to a sensible default.
+  aiProvider     String? @map("ai_provider")
+  aiApiKey       String? @map("ai_api_key")
+  aiModel        String? @map("ai_model")
+  aiSystemPrompt String? @map("ai_system_prompt")
+  serperApiKey   String? @map("serper_api_key")
+
+  // ── Telegram seller notifications ─────────────────────────────────────────
+  // The store owner's Telegram chat ID. When set, the bot sends an order
+  // notification here whenever a buyer places an order through this store.
+  // The owner gets their chat ID by messaging the bot and using /myid.
+  telegramNotifyChatId String? @map("telegram_notify_chat_id")
+
+  // ── Per-store payment config ───────────────────────────────────────────────
+  // paymentProvider: "mock" | "paymongo" | "stripe"
+  // paymentApiKey:   secret key for the provider (never returned to client)
+  // paymentPublicKey: public/publishable key (PayMongo pk_xxx, Stripe pk_xxx)
+  // paymentWebhookSecret: used to verify incoming webhook signatures
+  paymentProvider      String? @map("payment_provider")
+  paymentApiKey        String? @map("payment_api_key")
+  paymentPublicKey     String? @map("payment_public_key")
+  paymentWebhookSecret String? @map("payment_webhook_secret")
+
+  platformKey PlatformKey?
+  auditLogs   AuditLog[]
+
+  @@map("retailers")
+}
+
+// ─── Platform keys (one active key per retailer) ──────────────────────────────
+model PlatformKey {
+  id         Int       @id @default(autoincrement())
+  retailerId Int       @unique @map("retailer_id")
+  key        String    @unique
+  issuedAt   DateTime  @default(now()) @map("issued_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  retailer Retailer @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+
+  @@map("platform_keys")
+}
+
+// ─── Audit log (key events) ───────────────────────────────────────────────────
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  retailerId Int      @map("retailer_id")
+  event      String
+  meta       Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  retailer Retailer @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}
+
+// ─── Gateway-level key-value settings ─────────────────────────────────────────
+// Managed via GET/PUT /api/settings/:key (admin-guarded).
+//
+// Reserved keys:
+//   telegram_bot_token   — BotFather token for the customer Telegram bot
+//
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}

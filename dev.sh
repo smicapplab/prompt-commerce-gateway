@@ -25,7 +25,8 @@ G='\033[0;32m'  # green
 R='\033[0;31m'  # red
 N='\033[0m'     # reset
 
-PREFIX_GW="${Y}[gateway]    ${N}"
+PREFIX_GW="${Y}[gateway-api] ${N}"
+PREFIX_UI="${G}[gateway-ui]  ${N}"
 
 pids=()
 
@@ -112,6 +113,13 @@ else
   echo -e "${PREFIX_GW}Using remote DATABASE_URL (skipping Docker)"
 fi
 
+# ── Frontend Setup ────────────────────────────────────────────────────────────
+if [ ! -d "$DIR/frontend/node_modules" ]; then
+  echo -e "${PREFIX_UI}Installing frontend dependencies…"
+  cd "$DIR/frontend" && npm install 2>&1 | sed "s/^/$(echo -e "$PREFIX_UI")/"
+  cd "$DIR"
+fi
+
 # ── Prisma generate ───────────────────────────────────────────────────────────
 echo -e "${PREFIX_GW}Generating Prisma client…"
 npx prisma generate 2>&1 | sed "s/^/$(echo -e "$PREFIX_GW")/"
@@ -120,12 +128,16 @@ npx prisma generate 2>&1 | sed "s/^/$(echo -e "$PREFIX_GW")/"
 echo -e "${PREFIX_GW}Applying pending migrations…"
 npx prisma migrate deploy 2>&1 | sed "s/^/$(echo -e "$PREFIX_GW")/" || true
 
-# ── Start the server ──────────────────────────────────────────────────────────
-echo -e "${PREFIX_GW}Starting Gateway server…"
+# ── Start the servers ─────────────────────────────────────────────────────────
+echo -e "${PREFIX_GW}Starting Gateway API…"
 run_with_prefix "$PREFIX_GW" bash -c "npm run dev"
+
+echo -e "${PREFIX_UI}Starting Gateway UI…"
+run_with_prefix "$PREFIX_UI" bash -c "cd frontend && npm run dev"
 
 echo ""
 echo -e "  ${Y}Gateway API${N}   → http://localhost:${GATEWAY_PORT:-3002}"
+echo -e "  ${G}Gateway UI${N}    → http://localhost:5173"
 echo -e "  ${Y}MCP SSE hub${N}  → http://localhost:${GATEWAY_PORT:-3002}/sse"
 echo ""
 echo "  Press Ctrl+C to stop."

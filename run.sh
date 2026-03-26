@@ -65,8 +65,11 @@ echo -e "${G}Step 3/5: Applying database migrations...${N}"
 npm run db:migrate:prod
 
 # ── 5. Build the application ──────────────────────────────────────────────────
-echo -e "${G}Step 4/5: Building application...${N}"
+echo -e "${G}Step 4/5: Building API application...${N}"
 npm run build
+
+echo -e "${G}Step 4.5/5: Building UI application...${N}"
+(cd "$(dirname "$0")/frontend" && npm install && npm run build)
 
 # ── 6. Start / reload with PM2 ───────────────────────────────────────────────
 echo -e "${G}Step 5/5: Launching with PM2...${N}"

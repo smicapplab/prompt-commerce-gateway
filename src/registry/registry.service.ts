@@ -4,7 +4,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { PrismaClient, Retailer } from '@prisma/client';
+import { PrismaClient, Retailer } from '../generated/client';
 import { PRISMA } from '../prisma/prisma.module';
 import { KeysService } from '../keys/keys.service';
 import { MailService } from '../mail/mail.service';
@@ -30,6 +30,8 @@ export interface UpdateRetailerDto {
   aiModel?:        string | null;
   aiSystemPrompt?: string | null;
   serperApiKey?:   string | null;
+  // Telegram seller notifications
+  telegramNotifyChatId?: string | null;
   // Payment gateway config
   paymentProvider?:      string | null;
   paymentApiKey?:        string | null;

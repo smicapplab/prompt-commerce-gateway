@@ -26,6 +26,12 @@ model Retailer {
   aiSystemPrompt String? @map("ai_system_prompt")
   serperApiKey   String? @map("serper_api_key")
 
+  // ── Telegram seller notifications ─────────────────────────────────────────
+  // The store owner's Telegram chat ID. When set, the bot sends an order
+  // notification here whenever a buyer places an order through this store.
+  // The owner gets their chat ID by messaging the bot and using /myid.
+  telegramNotifyChatId String? @map("telegram_notify_chat_id")
+
   // ── Per-store payment config ───────────────────────────────────────────────
   // paymentProvider: "mock" | "paymongo" | "stripe"
   // paymentApiKey:   secret key for the provider (never returned to client)

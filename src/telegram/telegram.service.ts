@@ -5,7 +5,7 @@ import { SettingsService } from '../settings/settings.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { callRetailerTool } from '../mcp/retailer-client';
 import { AiChatService, type StoreAiConfig } from './ai-chat.service';
-import { CartStore } from './cart.store';
+import { CartService } from './cart.service';
 import type { PaymentService } from '../payments/payment.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
          productListKeyboard, productDetailKeyboard, cartKeyboard,
@@ -114,12 +114,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private checkoutSessions = new Map<number, CheckoutState>();
   private aiSessions       = new Map<number, AiState>();
   private searchQueries    = new Map<number, string>();  // userId → last search query
+  private lastOrderAt      = new Map<number, number>();  // userId → epoch ms of last order
 
   constructor(
     private readonly registry: RegistryService,
     private readonly settings: SettingsService,
     private readonly catalog: CatalogService,
     private readonly aiChat: AiChatService,
+    private readonly cartService: CartService,
     @Optional() private readonly paymentService?: PaymentService,
   ) {}
 
@@ -143,6 +145,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       { command: 'stores',  description: 'Browse stores' },
       { command: 'cart',    description: 'View your cart' },
       { command: 'help',    description: 'Show help' },
+      { command: 'myid',    description: 'Show your Telegram chat ID (for store owners)' },
     ]);
     this.bot.start({ onStart: () => this.logger.log('Telegram bot started.') });
   }
@@ -241,6 +244,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
+    // ── /myid ──────────────────────────────────────────────────────────────
+    bot.command('myid', async (ctx) => {
+      const chatId = ctx.chat?.id;
+      await ctx.reply(
+        `🆔 <b>Your Telegram Chat ID:</b> <code>${chatId}</code>\n\n` +
+        `Store owners can use this ID in the seller admin panel under\n` +
+        `<i>Settings → Telegram → Notification Chat ID</i> to receive\n` +
+        `order notifications for their store.`,
+        { parse_mode: 'HTML' },
+      );
+    });
+
     // ── Callback queries ───────────────────────────────────────────────────
     bot.on('callback_query:data', async (ctx) => {
       await ctx.answerCallbackQuery();
@@ -314,7 +329,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         // r:<slug>:<productId> — remove from cart
         if (data.startsWith('r:')) {
           const [, slug, productId] = data.split(':');
-          CartStore.remove(userId, slug, parseInt(productId));
+          await this.cartService.remove(userId, slug, parseInt(productId));
           await this.sendCart(ctx, userId, slug);
           return;
         }
@@ -356,7 +371,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         if (data.startsWith('cancel:')) {
           const slug = data.slice(7);
           this.checkoutSessions.delete(userId);
-          CartStore.clear(userId, slug);
+          await this.cartService.clear(userId, slug);
           const retailer = await this.registry.findBySlug(slug);
           await ctx.editMessageText(
             `Order cancelled. Your cart has been cleared.\n\n${storeMenuMessage(retailer.name)}`,
@@ -624,21 +639,21 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    CartStore.add(userId, slug, {
+    await this.cartService.add(userId, slug, {
       productId: product.id,
       title: product.title,
       price: product.price ?? 0,
     });
 
-    const total = CartStore.total(userId, slug);
+    const total = await this.cartService.total(userId, slug);
     await ctx.answerCallbackQuery(`✅ Added! Cart total: ${price(total)}`);
   }
 
   // ─── Send cart ──────────────────────────────────────────────────────────────
   private async sendCart(ctx: any, userId: number, slug: string): Promise<void> {
     const retailer = await this.registry.findBySlug(slug);
-    const items = CartStore.get(userId, slug);
-    const total = CartStore.total(userId, slug);
+    const items = await this.cartService.get(userId, slug);
+    const total = await this.cartService.total(userId, slug);
     const text  = cartSummary(retailer.name, items, total);
 
     const reply_markup = items.length
@@ -655,7 +670,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Checkout flow ──────────────────────────────────────────────────────────
   private async startCheckout(ctx: any, userId: number, slug: string): Promise<void> {
-    if (CartStore.isEmpty(userId, slug)) {
+    if (await this.cartService.isEmpty(userId, slug)) {
       await ctx.editMessageText('Your cart is empty. Add some products first!', {
         reply_markup: emptyCartKeyboard(slug),
       });
@@ -674,7 +689,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const { storeSlug } = state;
 
     if (state.step === 'name') {
-      state.name = text;
+      const trimmed = text.trim();
+      if (!trimmed || trimmed.length > 100) {
+        await ctx.reply('⚠️ Please enter a valid name (1–100 characters).');
+        return;
+      }
+      state.name = trimmed;
       state.step = 'email';
       this.checkoutSessions.set(userId, state);
       await ctx.reply('📧 What\'s your email address?');
@@ -682,7 +702,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (state.step === 'email') {
-      state.email = text;
+      const trimmed = text.trim().toLowerCase();
+      const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+      if (!emailRe.test(trimmed) || trimmed.length > 254) {
+        await ctx.reply('⚠️ That doesn\'t look like a valid email address. Please try again.');
+        return;
+      }
+      state.email = trimmed;
       state.step = 'address';
       this.checkoutSessions.set(userId, state);
       await ctx.reply('🏠 What\'s your delivery address?');
@@ -690,12 +716,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (state.step === 'address') {
-      state.address = text;
+      const trimmed = text.trim();
+      if (!trimmed || trimmed.length > 300) {
+        await ctx.reply('⚠️ Please enter a valid address (1–300 characters).');
+        return;
+      }
+      state.address = trimmed;
       state.step = 'confirm';
       this.checkoutSessions.set(userId, state);
 
-      const items = CartStore.get(userId, storeSlug);
-      const total = CartStore.total(userId, storeSlug);
+      const items = await this.cartService.get(userId, storeSlug);
+      const total = await this.cartService.total(userId, storeSlug);
       const summary = items.map(i => `• ${i.title} × ${i.quantity} — ${price(i.price * i.quantity)}`).join('\n');
 
       const confirmKb = new InlineKeyboard()
@@ -721,8 +752,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const items = CartStore.get(userId, slug);
-    const total = CartStore.total(userId, slug);
+    // ── Rate limiting: one order per 30 seconds per user ────────────────────
+    const ORDER_COOLDOWN_MS = 30_000;
+    const lastOrder = this.lastOrderAt.get(userId) ?? 0;
+    const msSinceLast = Date.now() - lastOrder;
+    if (msSinceLast < ORDER_COOLDOWN_MS) {
+      const waitSec = Math.ceil((ORDER_COOLDOWN_MS - msSinceLast) / 1000);
+      await ctx.answerCallbackQuery(`⏳ Please wait ${waitSec}s before placing another order.`);
+      return;
+    }
+
+    const items = await this.cartService.get(userId, slug);
+    const total = await this.cartService.total(userId, slug);
 
     const retailer = await this.getRetailer(slug);
     const notes = `Name: ${state.name}, Email: ${state.email}, Address: ${state.address}`;
@@ -742,8 +783,31 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const match = resultText.match(/Order #(\d+)/);
       const orderId = match ? parseInt(match[1]) : 0;
 
-      CartStore.clear(userId, slug);
+      await this.cartService.clear(userId, slug);
       this.checkoutSessions.delete(userId);
+      this.lastOrderAt.set(userId, Date.now());
+
+      // ── Notify seller of new order ────────────────────────────────────────
+      if (this.bot && orderId) {
+        try {
+          const fullRetailer = await this.registry.findBySlug(slug);
+          if (fullRetailer.telegramNotifyChatId) {
+            const itemSummary = items.map(i => `• ${esc(i.title)} × ${i.quantity} — ${price(i.price * i.quantity)}`).join('\n');
+            this.bot.api.sendMessage(
+              fullRetailer.telegramNotifyChatId,
+              `🛒 <b>New Order #${orderId}</b> — ${esc(fullRetailer.name)}\n\n` +
+              `${itemSummary}\n\n` +
+              `<b>Total:</b> ${price(total)}\n` +
+              `<b>Buyer:</b> ${esc(state.name ?? '')}\n` +
+              `<b>Email:</b> ${esc(state.email ?? '')}\n` +
+              `<b>Address:</b> ${esc(state.address ?? '')}`,
+              { parse_mode: 'HTML' },
+            ).catch((e: any) => this.logger.error(`Seller notify failed for ${slug}: ${e}`));
+          }
+        } catch (e) {
+          this.logger.warn(`Could not load retailer for seller notify (${slug}): ${e}`);
+        }
+      }
 
       // ── Step 2: Initiate payment if PaymentService is wired in ──────────────
       if (this.paymentService && orderId) {

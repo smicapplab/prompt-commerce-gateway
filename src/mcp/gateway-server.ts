@@ -16,6 +16,12 @@ import { callRetailerTool, pingRetailer } from './retailer-client';
  *   GET  /sse       — MCP SSE connection endpoint
  *   POST /messages  — MCP message endpoint
  */
+// ── Write-only tool names — require platform key auth ─────────────────────────
+const WRITE_TOOLS = new Set([
+  'add_product', 'update_product', 'update_inventory', 'import_products',
+  'add_category', 'batch_add_categories', 'update_category', 'add_promotion',
+]);
+
 export function mountGatewayMcp(
   app: express.Application,
   registry: RegistryService,
@@ -36,10 +42,26 @@ export function mountGatewayMcp(
     };
   }
 
+  // ── Resolve platform key → store slug ─────────────────────────────────────
+  async function resolveApiKey(key: string): Promise<string | null> {
+    try {
+      const retailers = await registry.findActiveRetailers();
+      const match = retailers.find(r => r.platformKey?.key === key && !r.platformKey?.revokedAt);
+      return match?.slug ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Auth error helper ─────────────────────────────────────────────────────
+  function authError(msg: string) {
+    return { content: [{ type: 'text' as const, text: `🔒 ${msg}` }], isError: true };
+  }
+
   // ── Factory: create a fresh McpServer per connection ──────────────────────
-  // The MCP SDK only supports one active transport per McpServer instance.
-  // Creating a new server per SSE connection allows multiple concurrent clients.
-  function createServer(): McpServer {
+  // authorizedSlug: the store slug the connecting client is authenticated for.
+  // null = unauthenticated (read-only tools only).
+  function createServer(authorizedSlug: string | null): McpServer {
     const server = new McpServer({
       name: 'prompt-commerce-gateway',
       version: '1.0.0',
@@ -175,7 +197,7 @@ export function mountGatewayMcp(
     // ── Tool: add_product ────────────────────────────────────────────────────
     server.tool(
       'add_product',
-      'Add a new product to a store\'s catalog. Returns a preview by default — set confirm=true to save.',
+      'Add a new product to a store\'s catalog. Requires authentication (x-api-key). Returns a preview by default — set confirm=true to save.',
       {
         store: z.string().describe('Store slug'),
         title: z.string().min(1).describe('Product title'),
@@ -189,6 +211,8 @@ export function mountGatewayMcp(
         confirm: z.boolean().default(false).describe('Set to true to actually save. When false (default), returns a preview for review.'),
       },
       async ({ store, ...args }) => {
+        if (!authorizedSlug) return authError('add_product requires authentication. Connect with your store\'s x-api-key header.');
+        if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
         const result = await callRetailerTool(retailer, 'add_product', args);
         return result as never;
@@ -198,7 +222,7 @@ export function mountGatewayMcp(
     // ── Tool: update_product ─────────────────────────────────────────────────
     server.tool(
       'update_product',
-      'Update fields on an existing product. Returns a preview by default — set confirm=true to save.',
+      'Update fields on an existing product. Requires authentication (x-api-key). Returns a preview by default — set confirm=true to save.',
       {
         store: z.string().describe('Store slug'),
         id: z.number().int().describe('ID of the product to update'),
@@ -214,6 +238,8 @@ export function mountGatewayMcp(
         confirm: z.boolean().default(false).describe('Set to true to actually save. When false (default), returns a preview for review.'),
       },
       async ({ store, ...args }) => {
+        if (!authorizedSlug) return authError('update_product requires authentication. Connect with your store\'s x-api-key header.');
+        if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
         const result = await callRetailerTool(retailer, 'update_product', args);
         return result as never;
@@ -223,7 +249,7 @@ export function mountGatewayMcp(
     // ── Tool: update_inventory ───────────────────────────────────────────────
     server.tool(
       'update_inventory',
-      'Update the stock quantity for a product by ID or SKU. Returns a preview by default — set confirm=true to save.',
+      'Update the stock quantity for a product by ID or SKU. Requires authentication (x-api-key). Returns a preview by default — set confirm=true to save.',
       {
         store: z.string().describe('Store slug'),
         id: z.number().int().optional().describe('Product ID'),
@@ -232,6 +258,8 @@ export function mountGatewayMcp(
         confirm: z.boolean().default(false).describe('Set to true to actually save. When false (default), returns a preview for review.'),
       },
       async ({ store, ...args }) => {
+        if (!authorizedSlug) return authError('update_inventory requires authentication. Connect with your store\'s x-api-key header.');
+        if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
         const result = await callRetailerTool(retailer, 'update_inventory', args);
         return result as never;
@@ -241,13 +269,15 @@ export function mountGatewayMcp(
     // ── Tool: import_products ────────────────────────────────────────────────
     server.tool(
       'import_products',
-      'Bulk import or update products from a local Excel (.xlsx) or CSV file on the seller\'s machine. Returns a preview by default — set confirm=true to save.',
+      'Bulk import or update products from a local Excel (.xlsx) or CSV file on the seller\'s machine. Requires authentication (x-api-key). Returns a preview by default — set confirm=true to save.',
       {
         store: z.string().describe('Store slug'),
-        file_path: z.string().describe('Absolute path to the Excel or CSV file on the seller\'s machine'),
+        file_path: z.string().describe('Absolute path to the .xlsx or .csv file on the seller\'s machine'),
         confirm: z.boolean().default(false).describe('Set to true to actually save. When false (default), returns a preview for review.'),
       },
       async ({ store, ...args }) => {
+        if (!authorizedSlug) return authError('import_products requires authentication. Connect with your store\'s x-api-key header.');
+        if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
         const result = await callRetailerTool(retailer, 'import_products', args);
         return result as never;
@@ -257,7 +287,7 @@ export function mountGatewayMcp(
     // ── Tool: add_category ───────────────────────────────────────────────────
     server.tool(
       'add_category',
-      'Create a new product category in a store. Returns a preview by default — set confirm=true to save.',
+      'Create a new product category in a store. Requires authentication (x-api-key). Returns a preview by default — set confirm=true to save.',
       {
         store: z.string().describe('Store slug'),
         name: z.string().min(1).describe('Category name (must be unique)'),
@@ -265,6 +295,8 @@ export function mountGatewayMcp(
         confirm: z.boolean().default(false).describe('Set to true to actually save. When false (default), returns a preview for review.'),
       },
       async ({ store, ...args }) => {
+        if (!authorizedSlug) return authError('add_category requires authentication. Connect with your store\'s x-api-key header.');
+        if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
         const result = await callRetailerTool(retailer, 'add_category', args);
         return result as never;
@@ -274,7 +306,7 @@ export function mountGatewayMcp(
     // ── Tool: batch_add_categories ───────────────────────────────────────────
     server.tool(
       'batch_add_categories',
-      'Create multiple product categories at once, with optional hierarchy. Returns a preview by default — set confirm=true to save.',
+      'Create multiple product categories at once, with optional hierarchy. Requires authentication (x-api-key). Returns a preview by default — set confirm=true to save.',
       {
         store: z.string().describe('Store slug'),
         categories: z.array(z.object({
@@ -284,6 +316,8 @@ export function mountGatewayMcp(
         confirm: z.boolean().default(false).describe('Set to true to actually save.'),
       },
       async ({ store, ...args }) => {
+        if (!authorizedSlug) return authError('batch_add_categories requires authentication. Connect with your store\'s x-api-key header.');
+        if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
         const result = await callRetailerTool(retailer, 'batch_add_categories', args);
         return result as never;
@@ -293,7 +327,7 @@ export function mountGatewayMcp(
     // ── Tool: update_category ────────────────────────────────────────────────
     server.tool(
       'update_category',
-      'Update an existing category name or parent. Returns a preview by default — set confirm=true to save.',
+      'Update an existing category name or parent. Requires authentication (x-api-key). Returns a preview by default — set confirm=true to save.',
       {
         store: z.string().describe('Store slug'),
         id: z.number().int().describe('Category ID to update'),
@@ -302,6 +336,8 @@ export function mountGatewayMcp(
         confirm: z.boolean().default(false).describe('Set to true to actually save.'),
       },
       async ({ store, ...args }) => {
+        if (!authorizedSlug) return authError('update_category requires authentication. Connect with your store\'s x-api-key header.');
+        if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
         const result = await callRetailerTool(retailer, 'update_category', args);
         return result as never;
@@ -311,7 +347,7 @@ export function mountGatewayMcp(
     // ── Tool: add_promotion ──────────────────────────────────────────────────
     server.tool(
       'add_promotion',
-      'Create a promotion or voucher code for a store. Returns a preview by default — set confirm=true to save.',
+      'Create a promotion or voucher code for a store. Requires authentication (x-api-key). Returns a preview by default — set confirm=true to save.',
       {
         store: z.string().describe('Store slug'),
         title: z.string().min(1).describe('Promotion name/title'),
@@ -324,6 +360,8 @@ export function mountGatewayMcp(
         confirm: z.boolean().default(false).describe('Set to true to actually save. When false (default), returns a preview for review.'),
       },
       async ({ store, ...args }) => {
+        if (!authorizedSlug) return authError('add_promotion requires authentication. Connect with your store\'s x-api-key header.');
+        if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
         const result = await callRetailerTool(retailer, 'add_promotion', args);
         return result as never;
@@ -337,12 +375,22 @@ export function mountGatewayMcp(
   const transports = new Map<string, SSEServerTransport>();
 
   app.get('/sse', async (req, res) => {
+    // ── Optional auth: x-api-key must be a valid platform key if provided ────
+    const apiKey = req.headers['x-api-key'] as string | undefined;
+    let authorizedSlug: string | null = null;
+
+    if (apiKey) {
+      authorizedSlug = await resolveApiKey(apiKey);
+      if (!authorizedSlug) {
+        res.status(401).json({ error: 'Invalid x-api-key. Provide your store\'s platform key to enable write tools.' });
+        return;
+      }
+    }
+
     const transport = new SSEServerTransport('/messages', res);
     transports.set(transport.sessionId, transport);
     res.on('close', () => transports.delete(transport.sessionId));
-    // Create a fresh McpServer for this connection to avoid the
-    // "Already connected to a transport" error on reconnects/multiple clients.
-    const server = createServer();
+    const server = createServer(authorizedSlug);
     await server.connect(transport);
   });
 

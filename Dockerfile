@@ -15,6 +15,14 @@ RUN npx prisma generate
 # Cap heap to 460 MB so tsc fits inside Render free tier's 512 MB RAM
 RUN NODE_OPTIONS="--max-old-space-size=460" npm run build
 
+# ── Frontend (SvelteKit) ───────────────────────────────────────────────────────
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
 # ── Runtime ───────────────────────────────────────────────────────────────────
 FROM base AS runner
 ENV NODE_ENV=production
@@ -28,7 +36,8 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
 # prisma.config.ts tells Prisma v7 how to connect for migrations
 COPY prisma.config.ts ./
-COPY src/public ./src/public
+# SvelteKit frontend build (served as static assets by NestJS)
+COPY --from=frontend-builder /app/frontend/build ./frontend/build
 
 # Render dynamically assigns PORT; 10000 is the Render default
 EXPOSE 10000

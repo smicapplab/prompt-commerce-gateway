@@ -42,14 +42,23 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  // ── Static files (admin + registration UI) ─────────────────────────────────
-  // Dev: __dirname = src/  → look in src/public (ts-node)
-  // Prod: __dirname = dist/ → look in src/public (Dockerfile copies there)
-  const publicPath = fs.existsSync(path.join(__dirname, '..', 'src', 'public'))
-    ? path.join(__dirname, '..', 'src', 'public')
-    : path.join(__dirname, '..', 'public');
-  if (fs.existsSync(publicPath)) {
-    app.useStaticAssets(publicPath);
+  // ── Static files (SvelteKit UI) ────────────────────────────────────────────
+  const frontendBuildPath = path.join(__dirname, '..', 'frontend', 'build');
+  if (fs.existsSync(frontendBuildPath)) {
+    app.useStaticAssets(frontendBuildPath);
+    // SPA fallback: serve index.html for any non-API, non-SSE, non-webhook route
+    expressApp.use((req: any, res: any, next: any) => {
+      if (
+        req.path.startsWith('/api') ||
+        req.path.startsWith('/sse') ||
+        req.path.startsWith('/webhooks') ||
+        req.path.startsWith('/payment') ||
+        req.path.includes('.')
+      ) {
+        return next();
+      }
+      res.sendFile(path.join(frontendBuildPath, 'index.html'));
+    });
   }
 
   // ── Seed default admin ─────────────────────────────────────────────────────

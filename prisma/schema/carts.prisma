@@ -1,0 +1,18 @@
+// ─── Telegram shopping carts (persisted across restarts) ─────────────────────
+// One row per (userId, storeSlug, productId) — quantity tracked in the row.
+// userId is stored as a String because Telegram user IDs are 64-bit integers
+// which exceed JavaScript's safe integer range.
+model Cart {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id")     // Telegram user ID as string
+  storeSlug String   @map("store_slug")
+  productId Int      @map("product_id")
+  title     String
+  price     Float
+  quantity  Int      @default(1)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, storeSlug, productId])
+  @@index([userId, storeSlug])
+  @@map("carts")
+}

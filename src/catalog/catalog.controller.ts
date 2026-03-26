@@ -154,6 +154,36 @@ export class CatalogController {
     };
   }
 
+  // ── PATCH /api/stores/:slug/telegram-config ───────────────────────────
+  /**
+   * Pushed by the seller when the store owner sets their notification chat ID.
+   * Body: { notifyChatId: string | null }
+   * Auth: x-gateway-key header
+   */
+  @Patch(':slug/telegram-config')
+  async setTelegramConfig(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+    @Body() body: { notifyChatId?: string | null },
+  ) {
+    const retailer = await this.validateKey(slug, platformKey);
+    await this.registry.update(retailer.id, {
+      telegramNotifyChatId: body.notifyChatId ?? null,
+    });
+    return { message: `Telegram config updated for "${slug}".` };
+  }
+
+  // ── GET /api/stores/:slug/telegram-config/status ──────────────────────
+  /** Returns whether a notification chat ID is configured. Auth: x-gateway-key */
+  @Get(':slug/telegram-config/status')
+  async getTelegramConfigStatus(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+  ) {
+    const retailer = await this.validateKey(slug, platformKey);
+    return { hasNotifyChatId: !!retailer.telegramNotifyChatId };
+  }
+
   // ── GET /api/stores/:slug/sync/status ─────────────────────────────────
   /**
    * Returns whether the store has been synced and when.

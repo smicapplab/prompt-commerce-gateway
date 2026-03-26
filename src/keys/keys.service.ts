@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/client';
 import crypto from 'crypto';
 import { PRISMA } from '../prisma/prisma.module';
 
