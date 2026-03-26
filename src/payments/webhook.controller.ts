@@ -8,18 +8,24 @@
 import {
   Controller,
   Post,
+  Patch,
   Get,
   Param,
+  Body,
   Req,
   Res,
   Headers,
   RawBodyRequest,
   HttpCode,
   Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
+
 import { Request, Response } from 'express';
 import { PaymentService } from './payment.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { SettingsService } from '../settings/settings.service';
+import { KeysService } from '../keys/keys.service';
 
 @Controller()
 export class WebhookController {
@@ -28,7 +34,73 @@ export class WebhookController {
   constructor(
     private readonly paymentService: PaymentService,
     private readonly telegramService: TelegramService,
+    private readonly settings: SettingsService,
+    private readonly keys: KeysService,
   ) {}
+
+  // ── Bot config (pushed by seller when Telegram settings are saved) ────────
+
+  /**
+   * PATCH /api/bot/telegram
+   * Auth: x-gateway-key from any active store
+   * Body: { webhookUrl?: string | null }
+   * Saves the webhook URL globally and reinitialises the bot immediately.
+   */
+  @Patch('api/bot/telegram')
+  async setBotConfig(
+    @Headers('x-gateway-key') gatewayKey: string,
+    @Body() body: { webhookUrl?: string | null },
+  ) {
+    await this.validateAnyStoreKey(gatewayKey);
+
+    const url = body.webhookUrl?.trim() || null;
+    if (url) {
+      await this.settings.set('telegram_webhook_url', url);
+    } else {
+      await this.settings.delete('telegram_webhook_url');
+    }
+
+    // Reinitialise bot immediately so the change takes effect without a restart
+    await this.telegramService.initBot();
+
+    return { message: url ? `Webhook mode enabled → ${url}` : 'Polling mode enabled', webhookUrl: url };
+  }
+
+  /**
+   * GET /api/bot/telegram/status
+   * Auth: x-gateway-key from any active store
+   * Returns current mode (polling|webhook) plus live Telegram webhook info.
+   */
+  @Get('api/bot/telegram/status')
+  async getBotStatus(@Headers('x-gateway-key') gatewayKey: string) {
+    await this.validateAnyStoreKey(gatewayKey);
+    const status = await this.telegramService.getWebhookStatus();
+    const webhookUrl = await this.settings.get('telegram_webhook_url');
+    return { ...status, configuredUrl: webhookUrl ?? null };
+  }
+
+  private async validateAnyStoreKey(gatewayKey: string): Promise<void> {
+    if (!gatewayKey) throw new UnauthorizedException('x-gateway-key header required.');
+    const valid = await this.keys.validateKey(gatewayKey);
+    if (!valid) throw new UnauthorizedException('Invalid gateway key.');
+  }
+
+  // ── Telegram webhook ───────────────────────────────────────────────────────
+
+  @Post('webhooks/telegram')
+  @HttpCode(200)
+  async handleTelegramWebhook(
+    @Req() req: Request,
+    @Headers('x-telegram-bot-api-secret-token') secretToken: string,
+  ) {
+    if (!this.telegramService.validateWebhookSecret(secretToken ?? '')) {
+      this.logger.warn('Telegram webhook: invalid or missing secret token — ignoring');
+      // Return 200 anyway so Telegram doesn't retry; just silently discard
+      return { ok: true };
+    }
+    await this.telegramService.handleUpdate(req.body);
+    return { ok: true };
+  }
 
   // ── Provider webhook ───────────────────────────────────────────────────────
 

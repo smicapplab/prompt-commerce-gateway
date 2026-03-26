@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger, Optional } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { Bot, InlineKeyboard } from 'grammy';
 import { RegistryService } from '../registry/registry.service';
 import { SettingsService } from '../settings/settings.service';
@@ -109,6 +110,8 @@ interface AiState {
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: Bot | null = null;
+  private webhookMode = false;
+  private webhookSecret = '';
 
   // Per-user session maps (in-memory)
   private checkoutSessions = new Map<number, CheckoutState>();
@@ -127,7 +130,24 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
   async onModuleInit(): Promise<void> {
-    // Load bot token from DB first; fall back to env var for local dev convenience
+    await this.initBot();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.bot && !this.webhookMode) {
+      await this.bot.stop();
+    }
+  }
+
+  // ─── Bot initialisation (supports hot-reload on config change) ───────────────
+  async initBot(): Promise<void> {
+    // Gracefully stop existing polling bot before reinitialising
+    if (this.bot && !this.webhookMode) {
+      try { await this.bot.stop(); } catch { /* ignore */ }
+    }
+    this.bot = null;
+
+    // Load bot token from DB first; fall back to env var for local dev
     const token = (await this.settings.get('telegram_bot_token'))
       ?? process.env.TELEGRAM_BOT_TOKEN;
 
@@ -137,8 +157,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
+
     this.bot = new Bot(token);
     this.registerHandlers();
+
     // Register command menu shown in Telegram UI
     await this.bot.api.setMyCommands([
       { command: 'search',  description: 'Search products across all stores' },
@@ -147,11 +169,59 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       { command: 'help',    description: 'Show help' },
       { command: 'myid',    description: 'Show your Telegram chat ID (for store owners)' },
     ]);
-    this.bot.start({ onStart: () => this.logger.log('Telegram bot started.') });
+
+    const webhookUrl = (await this.settings.get('telegram_webhook_url'))?.trim();
+
+    if (webhookUrl) {
+      // ── Webhook mode ────────────────────────────────────────────────────────
+      this.webhookSecret = await this.ensureWebhookSecret();
+      await this.bot.api.setWebhook(webhookUrl, { secret_token: this.webhookSecret });
+      this.webhookMode = true;
+      this.logger.log(`Telegram bot started (webhook → ${webhookUrl})`);
+    } else {
+      // ── Polling mode ────────────────────────────────────────────────────────
+      // Delete any stale webhook before starting polling
+      await this.bot.api.deleteWebhook({ drop_pending_updates: false });
+      this.webhookMode = false;
+      this.bot.start({ onStart: () => this.logger.log('Telegram bot started (polling).') });
+    }
   }
 
-  onModuleDestroy(): Promise<void> | void {
-    return this.bot?.stop();
+  // ─── Webhook helpers ─────────────────────────────────────────────────────────
+
+  /** Called by WebhookController for each incoming Telegram update. */
+  async handleUpdate(update: unknown): Promise<void> {
+    if (!this.bot || !this.webhookMode) return;
+    await this.bot.handleUpdate(update as any);
+  }
+
+  /** Validates the secret token Telegram sends in X-Telegram-Bot-Api-Secret-Token. */
+  validateWebhookSecret(token: string): boolean {
+    return !!this.webhookSecret && token === this.webhookSecret;
+  }
+
+  /** Returns current mode + live webhook info from Telegram API. */
+  async getWebhookStatus(): Promise<Record<string, unknown>> {
+    if (!this.bot) return { mode: 'disabled', enabled: false };
+    try {
+      const info = await this.bot.api.getWebhookInfo();
+      return {
+        mode:    this.webhookMode ? 'webhook' : 'polling',
+        enabled: true,
+        ...info,
+      };
+    } catch {
+      return { mode: this.webhookMode ? 'webhook' : 'polling', enabled: true };
+    }
+  }
+
+  private async ensureWebhookSecret(): Promise<string> {
+    let secret = await this.settings.get('telegram_webhook_secret');
+    if (!secret) {
+      secret = randomBytes(32).toString('hex'); // 64 hex chars — valid secret token
+      await this.settings.set('telegram_webhook_secret', secret);
+    }
+    return secret;
   }
 
   // ─── Handler registration ───────────────────────────────────────────────────

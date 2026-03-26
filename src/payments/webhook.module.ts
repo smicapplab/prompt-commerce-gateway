@@ -5,9 +5,11 @@ import { Module } from '@nestjs/common';
 import { WebhookController } from './webhook.controller';
 import { PaymentModule } from './payment.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { SettingsModule } from '../settings/settings.module';
+import { KeysModule } from '../keys/keys.module';
 
 @Module({
-  imports:     [PaymentModule, TelegramModule],
+  imports:     [PaymentModule, TelegramModule, SettingsModule, KeysModule],
   controllers: [WebhookController],
 })
 export class WebhookModule {}

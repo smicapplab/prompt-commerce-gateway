@@ -6,3 +6,9 @@ uploads/
 .DS_Store
 .render-creds
 setup-render.sh
+
+# SvelteKit frontend build artifacts (regenerated on every build/dev run)
+.svelte-kit/
+build/
+frontend/.svelte-kit/
+frontend/build/
