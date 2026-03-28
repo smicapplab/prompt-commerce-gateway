@@ -9,14 +9,23 @@ import { AuthService } from './auth/auth.service';
 import { RegistryService } from './registry/registry.service';
 import express from 'express';
 import { mountGatewayMcp } from './mcp/gateway-server';
+import { ensureEnvSetup } from './auth/env-setup';
+
 async function bootstrap(): Promise<void> {
+  // ── Environment Setup ──────────────────────────────────────────────────────
+  ensureEnvSetup();
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log'],
     bodyParser: false,
   });
 
   // ── CORS ───────────────────────────────────────────────────────────────────
-  app.enableCors({ origin: true, credentials: true });
+  // SEC-6: Restrict CORS to trusted origins
+  app.enableCors({
+    origin: ['http://localhost:3000', 'https://your-seller-domain.com'],
+    credentials: true
+  });
 
   // ── Body parsing (Custom) ──────────────────────────────────────────────────
   const httpAdapter = app.getHttpAdapter();
