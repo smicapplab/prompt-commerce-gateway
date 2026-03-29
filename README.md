@@ -2,7 +2,17 @@
 
 The customer-facing hub of the Prompt Commerce network. The gateway connects independent retail stores (managed via the [Prompt Commerce Seller](../prompt-commerce)) to customers through a Telegram shopping bot powered by AI chat.
 
+
 ---
+
+## 🚀 Live Demo
+
+Experience Prompt Commerce in action:
+- 🛒 **Customer Gateway**: [https://gateway.13.212.57.92.nip.io/](https://gateway.13.212.57.92.nip.io/)
+- ⚡ **Admin Dashboard**: [https://admin.13.212.57.92.nip.io/](https://admin.13.212.57.92.nip.io/)
+
+---
+
 
 ## Architecture
 
