@@ -71,7 +71,7 @@ echo -e "${G}Step 4/5: Building API application...${N}"
 npm run build
 
 echo -e "${G}Step 4.5/5: Building UI application...${N}"
-(cd "$(dirname "$0")/frontend" && npm install && npm run build)
+(cd "$DIR/frontend" && npm install && npm run build)
 
 # ── 6. Start / reload with PM2 ───────────────────────────────────────────────
 echo -e "${G}Step 5/5: Launching with PM2...${N}"

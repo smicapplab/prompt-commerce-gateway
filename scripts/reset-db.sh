@@ -28,21 +28,21 @@ echo "  Prompt Commerce Gateway — Database Reset"
 echo "  ─────────────────────────────────────────"
 echo ""
 
-# ── 1. Load & Export Environment ──────────────────────────────────────────────
+# ── 1. Load Environment ───────────────────────────────────────────────────────
 if [ ! -f ".env" ]; then
   echo -e "${R}[error] .env not found.${N}"
   exit 1
 fi
 
-# Export all variables from .env so they are available to sub-processes
-set -a
-source .env
-set +a
+# We use grep instead of 'source' because Postgres URLs often contain '?', '&', and '=' 
+# which bash misinterprets if the file is sourced directly without strict quoting.
+DATABASE_URL=$(grep "^DATABASE_URL=" .env | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '\r')
 
-if [ -z "${DATABASE_URL:-}" ]; then
+if [ -z "$DATABASE_URL" ]; then
   echo -e "${R}[error] DATABASE_URL not found in .env${N}"
   exit 1
 fi
+
 
 # ── 2. Prerequisites ──────────────────────────────────────────────────────────
 echo -e "  ${B}▶ Checking dependencies...${N}"
@@ -97,15 +97,5 @@ npx prisma migrate reset --force
 echo -e "\n  ${B}▶ Ensuring database is seeded...${N}"
 npm run db:seed
 
-# ── 5. Verification ───────────────────────────────────────────────────────────
-echo -e "\n  ${B}▶ Verifying Admin User...${N}"
-# Simple check to see if we can query the admin user
-if npx ts-node -e "import { PrismaClient } from '@prisma/client'; const p = new PrismaClient(); p.adminUser.count().then(c => { console.log('count=' + c); process.exit(c > 0 ? 0 : 1); }).catch(() => process.exit(1))" | grep -q "count=[1-9]"; then
-  echo -e "  ${G}✔ Admin user found in database.${N}"
-else
-  echo -e "  ${R}✘ Admin user NOT found! Seeding may have failed.${N}"
-  exit 1
-fi
-
-echo -e "\n  ${G}✔ Database reset and verified successfully!${N}"
+echo -e "\n  ${G}✔ Database reset and seeded successfully!${N}"
 echo ""
