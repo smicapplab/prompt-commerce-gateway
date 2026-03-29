@@ -68,6 +68,14 @@ export class StorefrontService {
     };
   }
 
+  async getConfig() {
+    const port = process.env.PORT ?? process.env.GATEWAY_PORT ?? '3002';
+    const baseUrl = (process.env.GATEWAY_PUBLIC_URL || `http://localhost:${port}`).replace(/\/$/, '');
+    return {
+      gatewayUrl: `${baseUrl}/sse`
+    };
+  }
+
   async getStoreProducts(slug: string, opts: { categoryId?: number; search?: string; page?: number; limit?: number; sort?: string }) {
     const { categoryId, search, page = 1, limit = 20, sort } = opts;
     const offset = (page - 1) * limit;

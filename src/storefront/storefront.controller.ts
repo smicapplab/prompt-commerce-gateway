@@ -15,6 +15,11 @@ export class StorefrontController {
     return this.storefrontService.getStoreDetail(slug);
   }
 
+  @Get('config')
+  async getConfig() {
+      return this.storefrontService.getConfig();
+  }
+
   @Get('stores/:slug/categories')
   async getStoreCategories(@Param('slug') slug: string) {
       return this.storefrontService.getStoreCategories(slug);

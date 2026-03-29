@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { Loader2 } from "lucide-svelte";
+  import { Loader2, Store, Upload, CheckCircle2, UserPlus, Info, ArrowRight } from "lucide-svelte";
   import { goto } from "$app/navigation";
+  import Header from "$lib/components/Header.svelte";
 
   let name = $state("");
   let slug = $state("");
@@ -65,191 +66,156 @@
   }
 </script>
 
-<div class="min-h-screen flex items-center justify-center p-6">
-  <div
-    class="max-w-xl w-full bg-[#1c1e26] border border-gray-800 rounded-2xl p-8 shadow-2xl"
-  >
-    <div class="flex items-center justify-center gap-3 mb-2 font-bold text-xl">
-      <img src="/logo-w.png" alt="Logo" class="w-12 h-12" />
-      <span class="pt-5">Prompt Commerce</span>
-    </div>
-    <div class="text-center text-gray-400 mb-8 text-sm">
-      Register your store on the AI catalog gateway
-    </div>
+<svelte:head>
+  <title>Register Store - Prompt Commerce</title>
+</svelte:head>
 
-    {#if errorMsg}
-      <div
-        class="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg text-sm mb-6"
-      >
-        {errorMsg}
-      </div>
-    {/if}
+<Header />
 
-    <form onsubmit={handleSubmit} class="space-y-5">
-      <div>
-        <label for="name" class="block text-sm font-medium text-gray-300 mb-1">
-          Store Name <span class="text-red-400">*</span>
-        </label>
-        <input
-          id="name"
-          type="text"
-          value={name}
-          oninput={handleNameInput}
-          placeholder="Steve's Sari-Sari Store"
-          required
-          class="w-full bg-[#0b0c10] border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-        />
-      </div>
+<div class="min-h-screen bg-gray-50 flex flex-col font-sans">
+  <main class="flex-1 flex items-center justify-center p-6 lg:py-20">
+    <div class="max-w-xl w-full">
+      <div class="bg-white border border-gray-200 rounded-[3rem] p-8 md:p-14 shadow-2xl shadow-gray-200/50 relative overflow-hidden">
+        <!-- Decoration -->
+        <div class="absolute -top-10 -right-10 w-40 h-40 bg-blue-50/50 rounded-full blur-3xl pointer-events-none"></div>
 
-      <div>
-        <label for="slug" class="block text-sm font-medium text-gray-300 mb-1">
-          Store Slug <span class="text-red-400">*</span>
-          <span class="text-gray-500 font-normal ml-1"
-            >— URL-friendly, lowercase, no spaces</span
-          >
-        </label>
-        <div
-          class="flex items-center overflow-hidden bg-[#0b0c10] border border-gray-700 rounded-lg focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition-colors"
-        >
-          <span class="pl-4 pr-2 text-gray-500 text-sm whitespace-nowrap"
-            >prompt-commerce.io/store/</span
-          >
-          <input
-            id="slug"
-            bind:value={slug}
-            type="text"
-            placeholder="steves-store"
-            required
-            pattern="[a-z0-9\-]+"
-            class="w-full bg-transparent px-2 py-2.5 text-white focus:outline-none"
-          />
+        <div class="flex flex-col items-center gap-6 mb-12 text-center relative z-10">
+          <div class="w-20 h-20 bg-gray-900 rounded-[2rem] flex items-center justify-center shadow-2xl transform -rotate-3 hover:rotate-0 transition-transform duration-500">
+            <UserPlus size={40} class="text-white" strokeWidth={2.5} />
+          </div>
+          <div>
+            <h1 class="text-4xl font-black text-gray-900 tracking-tight leading-tight">Register Store</h1>
+            <p class="text-gray-500 font-medium text-lg mt-2">Join the global AI-powered retail network</p>
+          </div>
         </div>
-      </div>
 
-      <div>
-        <label
-          for="contactEmail"
-          class="block text-sm font-medium text-gray-300 mb-1"
-        >
-          Contact Email <span class="text-red-400">*</span>
-        </label>
-        <input
-          id="contactEmail"
-          bind:value={contactEmail}
-          type="email"
-          placeholder="you@example.com"
-          required
-          class="w-full bg-[#0b0c10] border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-        />
-      </div>
+        {#if errorMsg}
+          <div class="bg-red-50 border border-red-100 text-red-600 px-6 py-4 rounded-2xl text-sm font-black mb-10 flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
+            <div class="w-3 h-3 rounded-full bg-red-600 animate-pulse shrink-0"></div>
+            {errorMsg}
+          </div>
+        {/if}
 
-      <div>
-        <label
-          for="mcpServerUrl"
-          class="block text-sm font-medium text-gray-300 mb-1"
-        >
-          MCP Server URL <span class="text-red-400">*</span>
-          <span class="text-gray-500 font-normal ml-1"
-            >— public URL where your prompt-commerce instance is running</span
-          >
-        </label>
-        <input
-          id="mcpServerUrl"
-          bind:value={mcpServerUrl}
-          type="url"
-          placeholder="http://your-vps-ip:3001"
-          required
-          class="w-full bg-[#0b0c10] border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-        />
-      </div>
-
-      <div>
-        <label
-          for="businessPermit"
-          class="block text-sm font-medium text-gray-300 mb-1"
-        >
-          Business Permit
-          <span class="text-gray-500 font-normal ml-1"
-            >— upload a photo or scan (max 5 MB)</span
-          >
-        </label>
-        <div
-          class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-700 border-dashed rounded-lg hover:border-blue-500/50 transition-colors bg-[#0b0c10]"
-        >
-          <div class="space-y-1 text-center">
-            <svg
-              class="mx-auto h-12 w-12 text-gray-400"
-              stroke="currentColor"
-              fill="none"
-              viewBox="0 0 48 48"
-              aria-hidden="true"
-            >
-              <path
-                d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <div class="flex text-sm text-gray-400 justify-center">
-              <label
-                for="businessPermit"
-                class="relative cursor-pointer bg-transparent rounded-md font-medium text-blue-500 hover:text-blue-400 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500"
-              >
-                <span>Upload a file</span>
-                <input
-                  id="businessPermit"
-                  bind:files={fileList}
-                  type="file"
-                  accept="image/*,.pdf"
-                  class="sr-only"
-                />
+        <form onsubmit={handleSubmit} class="space-y-8 relative z-10">
+          <div class="grid grid-cols-1 gap-8">
+            <div>
+              <label for="name" class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1">
+                Store Name
               </label>
-              <p class="pl-1">or drag and drop</p>
+              <input
+                id="name"
+                type="text"
+                value={name}
+                oninput={handleNameInput}
+                placeholder="Steve's Sari-Sari Store"
+                required
+                class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-lg shadow-sm"
+              />
             </div>
-            <p class="text-xs text-gray-500">PNG, JPG, PDF up to 5MB</p>
+
+            <div>
+              <label for="slug" class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1">
+                Store Slug
+              </label>
+              <div class="flex items-center bg-gray-50 border border-gray-200 rounded-2xl focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all pr-4 shadow-sm overflow-hidden">
+                <span class="pl-6 pr-2 text-gray-300 text-base font-black whitespace-nowrap opacity-60">
+                  /store/
+                </span>
+                <input
+                  id="slug"
+                  bind:value={slug}
+                  type="text"
+                  placeholder="steves-store"
+                  required
+                  pattern="[a-z0-9\-]+"
+                  class="w-full bg-transparent py-5 text-gray-900 font-black focus:outline-none placeholder:text-gray-300 text-lg"
+                />
+              </div>
+            </div>
           </div>
+
+          <div>
+            <label for="contactEmail" class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1">
+              Contact Email
+            </label>
+            <input
+              id="contactEmail"
+              bind:value={contactEmail}
+              type="email"
+              placeholder="you@example.com"
+              required
+              class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-lg shadow-sm"
+            />
+          </div>
+
+          <div>
+            <label for="mcpServerUrl" class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1">
+              MCP Server URL
+            </label>
+            <input
+              id="mcpServerUrl"
+              bind:value={mcpServerUrl}
+              type="url"
+              placeholder="https://your-server.com"
+              required
+              class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-lg shadow-sm"
+            />
+             <div class="flex items-center gap-2 mt-3 ml-1 text-gray-400">
+               <Info size={14} class="text-blue-500" />
+               <span class="text-[10px] font-bold uppercase tracking-wider">Must be a public SSL endpoint</span>
+             </div>
+          </div>
+
+          <div>
+            <label for="businessPermit" class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1">
+              Business Permit
+            </label>
+            <div class="mt-1 flex justify-center px-6 py-10 border-2 border-gray-100 border-dashed rounded-[2.5rem] hover:border-blue-500/50 hover:bg-blue-50/30 transition-all bg-gray-50 group cursor-pointer relative shadow-sm overflow-hidden">
+              <input
+                id="businessPermit"
+                bind:files={fileList}
+                type="file"
+                accept="image/*,.pdf"
+                class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+              />
+              <div class="space-y-4 text-center">
+                <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto shadow-sm group-hover:scale-110 transition-transform text-gray-300 group-hover:text-blue-600">
+                  <Upload size={32} strokeWidth={2.5} />
+                </div>
+                <div class="flex flex-col">
+                  <span class="font-black text-gray-900 tracking-tight">Select your permit</span>
+                  <span class="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">PNG, JPG, PDF (Max 5MB)</span>
+                </div>
+              </div>
+            </div>
+            {#if fileList && fileList.length > 0}
+              <div class="mt-6 text-sm text-emerald-700 flex items-center gap-3 bg-emerald-50 px-6 py-4 rounded-2xl border border-emerald-100 font-black animate-in zoom-in-95">
+                <div class="bg-emerald-600 text-white p-1 rounded-full"><CheckCircle2 size={16} /></div>
+                {fileList[0].name} selected
+              </div>
+            {/if}
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            class="w-full flex items-center justify-center gap-4 bg-gray-900 hover:bg-black text-white py-6 px-8 rounded-3xl font-black text-xl transition-all shadow-2xl hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed mt-8 group"
+          >
+            {#if isLoading}
+              <Loader2 class="w-7 h-7 animate-spin" />
+              <span>Processing...</span>
+            {:else}
+              Submit Registration
+               <ArrowRight size={22} class="group-hover:translate-x-1 transition-transform" />
+            {/if}
+          </button>
+        </form>
+
+        <div class="mt-14 text-center text-[10px] text-gray-400 leading-relaxed border-t border-gray-100 pt-10 font-black uppercase tracking-[0.2em]">
+          Verification usually takes <span class="text-gray-900">24-48 hours</span>.<br />
+          Email confirmation will follow approval.
         </div>
-        {#if fileList && fileList.length > 0}
-          <div class="mt-2 text-sm text-emerald-400 flex items-center gap-2">
-            <svg
-              class="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M5 13l4 4L19 7"
-              ></path></svg
-            >
-            {fileList[0].name} selected
-          </div>
-        {/if}
       </div>
-
-      <button
-        type="submit"
-        disabled={isLoading}
-        class="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed mt-2"
-      >
-        {#if isLoading}
-          <Loader2 class="w-5 h-5 animate-spin" />
-          Registering...
-        {:else}
-          Submit Registration
-        {/if}
-      </button>
-    </form>
-
-    <div
-      class="mt-8 text-center text-sm text-gray-500 leading-relaxed border-t border-gray-800 pt-6"
-    >
-      Once your business permit is verified, you'll receive your platform key by
-      email.<br />
-      Paste it into your local
-      <strong class="text-gray-300">prompt-commerce</strong> admin panel to go live.
     </div>
-  </div>
+  </main>
 </div>

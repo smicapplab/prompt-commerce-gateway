@@ -13,7 +13,16 @@
     AlertTriangle,
     Eye,
     EyeOff,
+    Lock,
+    Shield,
+    ArrowRight,
+    ExternalLink,
+    Mail,
+    Globe,
+    Info,
+    X,
   } from "lucide-svelte";
+  import Header from "$lib/components/Header.svelte";
 
   // --- Auth & State ---
   let isLoggedIn = $state(false);
@@ -257,491 +266,672 @@
   }
 </script>
 
-<!-- Global Toast -->
-{#if toastMsg}
-  <div
-    class="fixed bottom-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg font-medium text-white {toastType ===
-    'success'
-      ? 'bg-emerald-600'
-      : 'bg-red-600'} transition-opacity animate-in fade-in slide-in-from-bottom-4"
-  >
-    {toastMsg}
-  </div>
-{/if}
+<svelte:head>
+  <title>Admin Portal - Prompt Commerce</title>
+</svelte:head>
+
+<Header />
 
 {#if !isLoggedIn}
   <!-- LOGIN SCREEN -->
-  <div class="min-h-screen flex items-center justify-center p-6 text-gray-100">
+  <div
+    class="min-h-screen bg-gray-50 flex items-center justify-center p-6 font-sans relative overflow-hidden"
+  >
+    <!-- Decoration -->
     <div
-      class="max-w-md w-full bg-[#1c1e26] border border-gray-800 rounded-2xl p-8 shadow-2xl"
-    >
-      <div class="flex flex-col items-center justify-center gap-3 mb-2">
-        <img src="/logo-w.png" alt="Logo" class="w-10 h-10" />
-        <div
-          class="flex items-center justify-center gap-3 mb-2 font-bold text-xl"
-        >
-          Prompt Commerce
-        </div>
-        <div class="text-center text-gray-400 mb-8 text-sm">Gateway Admin</div>
-      </div>
-      {#if loginError}
-        <div
-          class="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg text-sm mb-6"
-        >
-          {loginError}
-        </div>
-      {/if}
+      class="absolute -top-40 -left-40 w-96 h-96 bg-blue-100/50 blur-3xl rounded-full"
+    ></div>
+    <div
+      class="absolute -bottom-40 -right-40 w-96 h-96 bg-emerald-50/50 blur-3xl rounded-full"
+    ></div>
 
-      <form onsubmit={handleLogin} class="space-y-5">
-        <div>
-          <label
-            for="lUser"
-            class="block text-sm font-medium text-gray-300 mb-1">Username</label
+    <div class="max-w-md w-full relative z-10">
+      <div
+        class="bg-white border border-gray-200 rounded-[2.5rem] p-8 md:p-12 shadow-2xl shadow-gray-200/50"
+      >
+        <div class="flex flex-col items-center gap-6 mb-12 text-center">
+          <div
+            class="w-20 h-20 bg-gray-900 rounded-[2rem] flex items-center justify-center shadow-2xl transform -rotate-6 transition-transform hover:rotate-0 duration-500"
           >
-          <input
-            id="lUser"
-            type="text"
-            bind:value={lUser}
-            placeholder="admin"
-            required
-            class="w-full bg-[#0b0c10] border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-          />
-        </div>
-        <div>
-          <label
-            for="lPass"
-            class="block text-sm font-medium text-gray-300 mb-1">Password</label
-          >
-          <div class="relative">
-            <input
-              id="lPass"
-              type={showPass ? "text" : "password"}
-              bind:value={lPass}
-              placeholder="••••••••"
-              required
-              class="w-full bg-[#0b0c10] border border-gray-700 rounded-lg px-4 py-2.5 pr-12 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-            />
-            <button
-              type="button"
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
-              onclick={() => (showPass = !showPass)}
+            <Lock size={40} class="text-white" strokeWidth={2.5} />
+          </div>
+          <div>
+            <h1
+              class="text-4xl font-black text-gray-900 tracking-tight leading-tight"
             >
-              {#if showPass}
-                <EyeOff size={18} />
-              {:else}
-                <Eye size={18} />
-              {/if}
-            </button>
+              Admin Portal
+            </h1>
+            <p class="text-gray-500 font-medium text-lg mt-2">
+              Manage your AI retail network
+            </p>
           </div>
         </div>
-        <button
-          type="submit"
-          disabled={isLoggingIn}
-          class="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-4 rounded-xl font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed mt-2"
-        >
-          {#if isLoggingIn}
-            <Loader2 class="w-5 h-5 animate-spin" /> Signing in...
-          {:else}
-            Sign in
-          {/if}
-        </button>
-      </form>
+
+        {#if loginError}
+          <div
+            class="bg-red-50 border border-red-100 text-red-600 px-6 py-4 rounded-2xl text-sm font-black mb-8 flex items-center gap-4"
+          >
+            <div class="w-3 h-3 rounded-full bg-red-600 animate-pulse"></div>
+            {loginError}
+          </div>
+        {/if}
+
+        <form onsubmit={handleLogin} class="space-y-6">
+          <div>
+            <label
+              for="lUser"
+              class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1"
+              >Username</label
+            >
+            <input
+              id="lUser"
+              type="text"
+              bind:value={lUser}
+              placeholder="admin"
+              required
+              class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-lg shadow-sm"
+            />
+          </div>
+          <div>
+            <label
+              for="lPass"
+              class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1"
+              >Password</label
+            >
+            <div class="relative">
+              <input
+                id="lPass"
+                type={showPass ? "text" : "password"}
+                bind:value={lPass}
+                placeholder="••••••••"
+                required
+                class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-lg shadow-sm pr-14"
+              />
+              <button
+                type="button"
+                class="absolute right-6 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-900 transition-colors"
+                onclick={() => (showPass = !showPass)}
+              >
+                {#if showPass}
+                  <EyeOff size={22} strokeWidth={2.5} />
+                {:else}
+                  <Eye size={22} strokeWidth={2.5} />
+                {/if}
+              </button>
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={isLoggingIn}
+            class="w-full flex items-center justify-center gap-4 bg-gray-900 hover:bg-black text-white py-6 px-10 rounded-[1.5rem] font-black text-xl transition-all shadow-2xl hover:scale-[1.02] active:scale-95 disabled:opacity-50 mt-4 group"
+          >
+            {#if isLoggingIn}
+              <Loader2 class="w-7 h-7 animate-spin" />
+              <span>Signing in...</span>
+            {:else}
+              Sign in
+              <ArrowRight
+                size={24}
+                class="group-hover:translate-x-1 transition-transform"
+              />
+            {/if}
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 {:else}
-  <!-- ADMIN DASHBOARD -->
+  <!-- ADMIN DASHBOARD (Premium Light Theme) -->
   <div
-    class="min-h-screen bg-[#0b0c10] text-gray-100 flex h-screen overflow-hidden"
+    class="min-h-screen bg-gray-50 text-gray-900 flex h-[calc(100vh-80px)] overflow-hidden font-sans"
   >
     <!-- Sidebar -->
     <aside
-      class="w-64 bg-[#14161c] border-r border-gray-800 flex flex-col shrink-0 text-sm"
+      class="w-64 md:w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm relative z-20"
     >
-      <div
-        class="h-16 flex items-center px-6 border-b border-gray-800 text-white font-semibold gap-3 shrink-0"
-      >
-        <img src="/logo-w.png" alt="Logo" class="w-10 h-10" />
-        <span class="pt-2">Gateway Admin</span>
-      </div>
+      <div class="p-8 flex flex-col gap-3 overflow-y-auto">
+        <h3
+          class="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-4 ml-1"
+        >
+          Management
+        </h3>
 
-      <div class="p-4 flex flex-col gap-1 overflow-y-auto">
         <button
           onclick={() => switchTab("pending")}
-          class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors {currentTab ===
+          class="group flex items-center justify-between px-5 py-4 rounded-2xl transition-all {currentTab ===
           'pending'
-            ? 'bg-blue-600/10 text-blue-400 font-medium'
-            : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'}"
+            ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
+            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
         >
-          <ShieldAlert size={18} /> Pending
+          <div class="flex items-center gap-4">
+            <ShieldAlert size={22} strokeWidth={2.5} />
+            <span>Pending</span>
+          </div>
+          {#if retailers.filter((r) => !r.verified).length > 0}
+            <span
+              class="w-5 h-5 rounded-full {currentTab === 'pending'
+                ? 'bg-white text-blue-600'
+                : 'bg-blue-600 text-white'} text-[10px] flex items-center justify-center font-black"
+            >
+              {retailers.filter((r) => !r.verified).length}
+            </span>
+          {/if}
         </button>
+
         <button
           onclick={() => switchTab("verified")}
-          class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors {currentTab ===
+          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
           'verified'
-            ? 'bg-blue-600/10 text-blue-400 font-medium'
-            : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'}"
+            ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
+            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
         >
-          <ShieldCheck size={18} /> Verified
+          <ShieldCheck size={22} strokeWidth={2.5} /> Verified
         </button>
+
         <button
           onclick={() => switchTab("all")}
-          class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors {currentTab ===
+          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
           'all'
-            ? 'bg-blue-600/10 text-blue-400 font-medium'
-            : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'}"
+            ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
+            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
         >
-          <Users size={18} /> All Retailers
+          <Users size={22} strokeWidth={2.5} /> All Retailers
         </button>
+
+        <h3
+          class="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mt-10 mb-4 ml-1"
+        >
+          System
+        </h3>
+
         <button
           onclick={() => switchTab("settings")}
-          class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors {currentTab ===
+          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
           'settings'
-            ? 'bg-blue-600/10 text-blue-400 font-medium'
-            : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'}"
+            ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
+            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
         >
-          <Settings size={18} /> Settings
+          <Settings size={22} strokeWidth={2.5} /> Settings
         </button>
       </div>
 
-      <div class="mt-auto p-4 border-t border-gray-800">
+      <div class="mt-auto p-8 border-t border-gray-100">
         <button
           onclick={logout}
-          class="w-full flex items-center gap-3 px-3 py-2 text-gray-400 hover:text-red-400 transition-colors rounded-lg hover:bg-red-400/10"
+          class="w-full flex items-center justify-center gap-4 px-6 py-4 text-gray-900 border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-all rounded-2xl font-black shadow-sm"
         >
-          <LogOut size={18} /> Sign out
+          <LogOut size={20} strokeWidth={2.5} />
+          Sign out
         </button>
       </div>
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 overflow-y-auto p-8">
-      <h1 class="text-2xl font-bold text-white mb-8">
-        {currentTab === "pending"
-          ? "Pending Verification"
-          : currentTab === "verified"
-            ? "Verified Retailers"
-            : currentTab === "all"
-              ? "All Retailers"
-              : "Settings"}
-      </h1>
+    <main
+      class="flex-1 overflow-y-auto bg-gray-50/50 p-8 md:p-12 lg:p-16 relative"
+    >
+      <div class="max-w-7xl mx-auto">
+        <header class="mb-12 flex items-center justify-between relative z-10">
+          <div>
+            <h1
+              class="text-2xl lg:text-3xl font-black text-gray-900 tracking-tight leading-tight"
+            >
+              {currentTab === "pending"
+                ? "Pending Verification"
+                : currentTab === "verified"
+                  ? "Verified Retailers"
+                  : currentTab === "all"
+                    ? "All Retailers"
+                    : "Gateway Settings"}
+            </h1>
+            <p class="text-gray-500 font-medium text-lg mt-2">
+              {currentTab === "settings"
+                ? "Global gateway configuration and bot secrets."
+                : "Review and manage store certifications."}
+            </p>
+          </div>
 
-      {#if currentTab === "settings"}
-        <!-- Settings Panel -->
-        <div
-          class="max-w-2xl bg-[#1c1e26] border border-gray-800 rounded-2xl p-6 shadow-xl"
-        >
-          <div class="flex flex-col gap-6">
-            <div>
-              <h2 class="text-lg font-semibold text-white mb-1">
-                Gateway Settings
-              </h2>
-              <p class="text-sm text-gray-400 mb-6">
-                Global settings for this gateway instance. These apply to all
-                stores.
-              </p>
+          {#if currentTab !== "settings"}
+            <button
+              onclick={loadRetailers}
+              class="p-3 bg-white border border-gray-200 rounded-2xl text-gray-400 hover:text-gray-900 transition-all shadow-sm hover:shadow-lg active:scale-90"
+            >
+              <RotateCw class="w-6 h-6" />
+            </button>
+          {/if}
+        </header>
 
-              <div class="mb-6 border-b border-gray-800 pb-6">
-                <div class="flex justify-between items-center mb-4">
-                  <div class="font-medium text-white flex items-center gap-2">
-                    <svg
-                      class="w-5 h-5 text-blue-400"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path
-                        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .24z"
-                      />
-                    </svg>
-                    Telegram Bot
-                  </div>
-                  {#if tgTokenHasValue}
-                    <span
-                      class="text-xs font-semibold text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-md"
-                      >Token Configured</span
-                    >
-                  {:else}
-                    <span
-                      class="text-xs font-semibold text-gray-500 bg-gray-800 px-2 py-1 rounded-md"
-                      >Not Set</span
-                    >
-                  {/if}
-                </div>
+        {#if currentTab === "settings"}
+          <!-- Settings Panel -->
+          <div
+            class="max-w-2xl bg-white border border-gray-200 rounded-[2.5rem] p-10 md:p-14 shadow-2xl shadow-gray-200/50 relative overflow-hidden"
+          >
+            <div
+              class="absolute -top-20 -right-20 w-64 h-64 bg-blue-50/50 blur-3xl rounded-full pointer-events-none"
+            ></div>
 
-                <div class="relative">
-                  <input
-                    type={showTgToken ? "text" : "password"}
-                    bind:value={tgToken}
-                    placeholder={tgTokenHasValue
-                      ? "Paste new token to replace…"
-                      : "123456:ABC-DEF…"}
-                    class="w-full bg-[#0b0c10] border border-gray-700 rounded-lg px-4 py-2.5 pr-12 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-                  />
-                  <button
-                    type="button"
-                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
-                    onclick={() => (showTgToken = !showTgToken)}
+            <div class="relative z-10 flex flex-col gap-10">
+              <div>
+                <div class="flex items-center gap-4 mb-8">
+                  <div
+                    class="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-sm"
                   >
-                    {#if showTgToken}
-                      <EyeOff size={18} />
+                    <Shield size={28} strokeWidth={2.5} />
+                  </div>
+                  <div>
+                    <h2
+                      class="text-2xl font-black text-gray-900 tracking-tight"
+                    >
+                      System Bot Config
+                    </h2>
+                    <p
+                      class="text-gray-400 font-medium text-sm mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis"
+                    >
+                      Primary credentials for the Telegram API
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  class="mb-8 p-8 bg-gray-50 rounded-3xl border border-gray-100"
+                >
+                  <div class="flex justify-between items-center mb-6">
+                    <div
+                      class="font-black text-gray-900 flex items-center gap-3"
+                    >
+                      <svg
+                        class="w-6 h-6 text-blue-500"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                      >
+                        <path
+                          d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .24z"
+                        />
+                      </svg>
+                      Telegram Bot Token
+                    </div>
+                    {#if tgTokenHasValue}
+                      <span
+                        class="text-[10px] font-black text-emerald-600 bg-emerald-100 px-3 py-1 rounded-full uppercase tracking-wider"
+                        >Configured</span
+                      >
                     {:else}
-                      <Eye size={18} />
+                      <span
+                        class="text-[10px] font-black text-gray-400 bg-gray-200 px-3 py-1 rounded-full uppercase tracking-wider"
+                        >Missing</span
+                      >
                     {/if}
-                  </button>
-                </div>
-                <p class="text-xs text-gray-500 mt-2">
-                  Get this from <a
-                    href="https://t.me/BotFather"
-                    target="_blank"
-                    class="text-blue-400 hover:underline">@BotFather</a
-                  > on Telegram. Leave blank to keep existing.
-                </p>
-              </div>
+                  </div>
 
-              {#if settingsSavedMsg}
-                <div
-                  class="text-emerald-400 text-sm font-medium mb-4 flex items-center gap-2"
-                >
-                  <CheckCircle2 size={16} />
-                  {settingsSavedMsg}
+                  <div class="relative">
+                    <input
+                      type={showTgToken ? "text" : "password"}
+                      bind:value={tgToken}
+                      placeholder={tgTokenHasValue
+                        ? "••••••••••••••••••••••••••••••"
+                        : "Paste your bot token here..."}
+                      class="w-full bg-white border border-gray-200 rounded-2xl px-6 py-5 pr-14 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 shadow-sm"
+                    />
+                    <button
+                      type="button"
+                      class="absolute right-6 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-900 transition-colors"
+                      onclick={() => (showTgToken = !showTgToken)}
+                    >
+                      {#if showTgToken}
+                        <EyeOff size={22} strokeWidth={2.5} />
+                      {:else}
+                        <Eye size={22} strokeWidth={2.5} />
+                      {/if}
+                    </button>
+                  </div>
+                  <p
+                    class="text-xs text-gray-400 font-bold mt-4 flex items-center gap-2 uppercase tracking-wide"
+                  >
+                    <Info size={14} class="text-blue-500" />
+                    Obtained via @BotFather
+                  </p>
                 </div>
-              {/if}
 
-              {#if settingsError}
-                <div
-                  class="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg text-sm mb-4"
-                >
-                  {settingsError}
-                </div>
-              {/if}
-
-              <button
-                onclick={saveSettings}
-                disabled={isSavingSettings}
-                class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-5 rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center gap-2 text-sm"
-              >
-                {#if isSavingSettings}
-                  <Loader2 class="w-4 h-4 animate-spin" /> Saving...
-                {:else}
-                  Save Settings
+                {#if settingsSavedMsg}
+                  <div
+                    class="text-emerald-700 text-sm font-black mb-10 flex items-center gap-3 bg-emerald-50 px-6 py-4 rounded-2xl border border-emerald-100 animate-in zoom-in-95"
+                  >
+                    <CheckCircle2 size={18} />
+                    {settingsSavedMsg}
+                  </div>
                 {/if}
-              </button>
+
+                {#if settingsError}
+                  <div
+                    class="bg-red-50 border border-red-100 text-red-600 px-6 py-4 rounded-2xl text-sm font-black mb-10 flex items-center gap-3"
+                  >
+                    <AlertTriangle size={18} />
+                    {settingsError}
+                  </div>
+                {/if}
+
+                <button
+                  onclick={saveSettings}
+                  disabled={isSavingSettings}
+                  class="w-full bg-gray-900 hover:bg-black text-white py-6 px-8 rounded-3xl font-black text-xl transition-all shadow-2xl active:scale-95 disabled:opacity-70 flex items-center justify-center gap-4"
+                >
+                  {#if isSavingSettings}
+                    <Loader2 class="w-7 h-7 animate-spin px-1" />
+                    <span>Saving Changes...</span>
+                  {:else}
+                    Update Credentials
+                  {/if}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      {:else}
-        <!-- Retailers Panel -->
-        {#if showKeyBanner}
-          <div
-            class="mb-8 border border-emerald-500/30 bg-emerald-500/10 rounded-xl p-5 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-          >
-            <div>
+        {:else}
+          <!-- Retailers Panel -->
+          <div class="space-y-10 relative z-10">
+            {#if showKeyBanner}
               <div
-                class="text-emerald-400 font-semibold mb-1 flex items-center gap-2"
+                class="border border-emerald-200 bg-emerald-50 rounded-[2.5rem] p-10 shadow-2xl shadow-emerald-200/50 flex flex-col md:flex-row md:items-center justify-between gap-10 animate-in slide-in-from-top-4 duration-500"
               >
-                <CheckCircle2 size={18} /> Platform Key Issued
+                <div class="flex-1">
+                  <div
+                    class="text-emerald-800 font-black text-2xl mb-3 flex items-center gap-3 tracking-tight leading-none"
+                  >
+                    <div
+                      class="bg-emerald-600 text-white p-2 rounded-xl shadow-lg shadow-emerald-600/30"
+                    >
+                      <Key size={24} />
+                    </div>
+                    Platform Key Issued
+                  </div>
+                  <p
+                    class="text-emerald-700/80 font-bold text-lg mb-6 leading-relaxed"
+                  >
+                    Share this key with the retailer. It will <strong
+                      class="text-emerald-900 font-black">not</strong
+                    > be shown again.
+                  </p>
+                  <div
+                    class="font-mono bg-white text-emerald-900 px-8 py-5 rounded-2xl text-lg font-black border border-emerald-200 shadow-inner break-all"
+                  >
+                    {issuedKey}
+                  </div>
+                </div>
+                <button
+                  onclick={copyKey}
+                  class="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white py-6 px-10 rounded-[1.5rem] font-black text-xl transition-all shadow-2xl active:scale-95 flex items-center gap-3"
+                >
+                  Copy Secure Key
+                </button>
               </div>
-              <p class="text-sm text-emerald-400/80 mb-3">
-                Share this key with the retailer. It will <strong
-                  class="text-emerald-300">not</strong
-                > be shown again.
-              </p>
-              <div
-                class="font-mono bg-black/40 text-emerald-300 px-4 py-2.5 rounded-lg text-sm border border-emerald-500/20 inline-block overflow-x-auto max-w-full"
-              >
-                {issuedKey}
+            {/if}
+
+            <div
+              class="bg-white border border-gray-200 rounded-[3rem] shadow-2xl shadow-gray-200/50 overflow-hidden relative"
+            >
+              <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="bg-gray-50/50 border-b border-gray-100">
+                      <th
+                        class="px-10 py-8 text-[11px] font-black uppercase tracking-[0.3em] text-gray-400"
+                        >Retailer Detail</th
+                      >
+                      <th
+                        class="px-8 py-8 text-[11px] font-black uppercase tracking-[0.3em] text-gray-400"
+                        >Endpoint</th
+                      >
+                      <th
+                        class="px-8 py-8 text-[11px] font-black uppercase tracking-[0.3em] text-gray-400"
+                        >Status</th
+                      >
+                      <th
+                        class="px-10 py-8 text-[11px] font-black uppercase tracking-[0.3em] text-gray-400 text-right"
+                        >Actions</th
+                      >
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-50">
+                    {#if isLoadingRetailers}
+                      <tr>
+                        <td
+                          colspan="4"
+                          class="px-10 py-32 text-center text-gray-400"
+                        >
+                          <Loader2
+                            class="w-12 h-12 animate-spin mx-auto mb-6 text-blue-600"
+                          />
+                          <span class="font-bold text-lg"
+                            >Retreiving regional retail registry...</span
+                          >
+                        </td>
+                      </tr>
+                    {:else if filteredRetailers.length === 0}
+                      <tr>
+                        <td
+                          colspan="4"
+                          class="px-10 py-32 text-center text-gray-400"
+                        >
+                          <div
+                            class="w-20 h-20 bg-gray-50 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-gray-200"
+                          >
+                            <Users size={40} />
+                          </div>
+                          <h3 class="text-xl font-black text-gray-900 mb-2">
+                            Registry is empty
+                          </h3>
+                          <p class="font-medium">
+                            No retailers found in this category.
+                          </p>
+                        </td>
+                      </tr>
+                    {:else}
+                      {#each filteredRetailers as r}
+                        <tr class="group hover:bg-gray-50/50 transition-colors">
+                          <td class="px-10 py-10">
+                            <div class="flex items-center gap-6">
+                              <div
+                                class="w-16 h-16 rounded-2xl bg-gray-900 text-white flex items-center justify-center text-2xl font-black shadow-lg transform -rotate-1 group-hover:rotate-0 transition-transform"
+                              >
+                                {r.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div
+                                  class="text-gray-900 font-black text-xl tracking-tight mb-1 group-hover:text-blue-600 transition-colors"
+                                >
+                                  {r.name}
+                                </div>
+                                <div class="flex items-center gap-4">
+                                  <div
+                                    class="flex items-center gap-2 text-gray-400 text-xs font-bold uppercase tracking-wider"
+                                  >
+                                    <Globe size={12} />
+                                    {r.slug}
+                                  </div>
+                                  <div
+                                    class="flex items-center gap-2 text-gray-400 text-xs font-bold uppercase tracking-wider"
+                                  >
+                                    <Mail size={12} />
+                                    {r.contactEmail}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td class="px-8 py-10">
+                            <div class="flex flex-col gap-2">
+                              <span
+                                class="bg-gray-100 text-gray-500 px-3 py-1.5 rounded-xl text-xs font-black truncate max-w-[200px] inline-block font-mono border border-gray-100 group-hover:bg-white transition-colors"
+                                title={r.mcpServerUrl}
+                              >
+                                {r.mcpServerUrl}
+                              </span>
+                              {#if r.businessPermitUrl}
+                                <a
+                                  href={`/${r.businessPermitUrl}`}
+                                  target="_blank"
+                                  class="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 text-[10px] font-black uppercase tracking-widest pl-1"
+                                >
+                                  <ExternalLink size={12} /> Permit PDF
+                                </a>
+                              {/if}
+                            </div>
+                          </td>
+                          <td class="px-8 py-10">
+                            <div class="flex flex-col gap-3">
+                              <div class="flex items-center gap-2">
+                                {#if r.verified}
+                                  <span
+                                    class="text-[9px] font-black text-emerald-700 bg-emerald-100 px-3 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-1.5"
+                                  >
+                                    <div
+                                      class="w-1.5 h-1.5 rounded-full bg-emerald-500"
+                                    ></div>
+                                    Verified
+                                  </span>
+                                {:else}
+                                  <span
+                                    class="text-[9px] font-black text-amber-700 bg-amber-100 px-3 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-1.5"
+                                  >
+                                    <div
+                                      class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"
+                                    ></div>
+                                    Review
+                                  </span>
+                                {/if}
+                              </div>
+                              <div class="flex items-center gap-2">
+                                {#if r.platformKey && !r.platformKey.revokedAt}
+                                  <span
+                                    class="text-[9px] font-black text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-1.5 border border-gray-100"
+                                  >
+                                    <Key size={10} /> Key Active
+                                  </span>
+                                {:else}
+                                  <span
+                                    class="text-[9px] font-black text-red-500 bg-red-50 px-3 py-1.5 rounded-full uppercase tracking-widest flex items-center gap-1.5 border border-red-50"
+                                  >
+                                    <AlertTriangle size={10} /> No Key
+                                  </span>
+                                {/if}
+                              </div>
+                            </div>
+                          </td>
+                          <td class="px-10 py-10 text-right">
+                            <div
+                              class="flex items-center justify-end gap-3 flex-wrap"
+                            >
+                              {#if !r.verified}
+                                <button
+                                  onclick={() => verifyStore(r.id)}
+                                  class="text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl transition-all shadow-lg active:scale-95"
+                                >
+                                  Verify
+                                </button>
+                              {/if}
+
+                              <button
+                                onclick={() => issueKey(r.id)}
+                                class="text-xs font-black bg-white border border-gray-200 hover:border-gray-900 text-gray-900 px-6 py-3 rounded-2xl transition-all shadow-sm active:scale-95 flex items-center gap-2.5"
+                              >
+                                {#if r.platformKey && !r.platformKey.revokedAt}
+                                  <RotateCw size={14} strokeWidth={2.5} /> Rotate
+                                {:else}
+                                  <Key size={14} strokeWidth={2.5} /> Issue Key
+                                {/if}
+                              </button>
+
+                              {#if r.verified}
+                                {#if r.active}
+                                  <button
+                                    onclick={() => toggleActive(r.id, false)}
+                                    class="text-xs font-black bg-red-50 hover:bg-red-100 text-red-600 px-6 py-3 rounded-2xl transition-all border border-red-100 active:scale-95"
+                                  >
+                                    Suspend
+                                  </button>
+                                {:else}
+                                  <button
+                                    onclick={() => toggleActive(r.id, true)}
+                                    class="text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl transition-all shadow-lg active:scale-95"
+                                  >
+                                    Reactivate
+                                  </button>
+                                {/if}
+                              {/if}
+                            </div>
+                          </td>
+                        </tr>
+                      {/each}
+                    {/if}
+                  </tbody>
+                </table>
               </div>
             </div>
-            <button
-              onclick={copyKey}
-              class="shrink-0 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 py-2 px-4 rounded-lg font-medium transition-colors text-sm self-start sm:self-auto border border-emerald-500/30"
-            >
-              Copy Key
-            </button>
           </div>
         {/if}
-
-        <div
-          class="bg-[#1c1e26] border border-gray-800 rounded-2xl shadow-xl overflow-hidden"
-        >
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm text-left">
-              <thead
-                class="text-xs uppercase bg-[#14161c] text-gray-400 border-b border-gray-800"
-              >
-                <tr>
-                  <th class="px-5 py-4 font-medium tracking-wider">Store</th>
-                  <th class="px-5 py-4 font-medium tracking-wider">MCP URL</th>
-                  <th class="px-5 py-4 font-medium tracking-wider">Email</th>
-                  <th class="px-5 py-4 font-medium tracking-wider text-center"
-                    >Permit</th
-                  >
-                  <th class="px-5 py-4 font-medium tracking-wider">Status</th>
-                  <th class="px-5 py-4 font-medium tracking-wider">Key</th>
-                  <th class="px-5 py-4 font-medium tracking-wider text-right"
-                    >Actions</th
-                  >
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-800">
-                {#if isLoadingRetailers}
-                  <tr>
-                    <td
-                      colspan="7"
-                      class="px-5 py-12 text-center text-gray-500"
-                    >
-                      <Loader2 class="w-6 h-6 animate-spin mx-auto mb-2" />
-                      Loading retailers...
-                    </td>
-                  </tr>
-                {:else if filteredRetailers.length === 0}
-                  <tr>
-                    <td
-                      colspan="7"
-                      class="px-5 py-12 text-center text-gray-500"
-                    >
-                      No retailers found in this category.
-                    </td>
-                  </tr>
-                {:else}
-                  {#each filteredRetailers as r}
-                    <tr class="hover:bg-gray-800/30 transition-colors">
-                      <td class="px-5 py-4">
-                        <div class="text-white font-medium mb-0.5">
-                          {r.name}
-                        </div>
-                        <div class="text-gray-500 text-xs">{r.slug}</div>
-                      </td>
-                      <td
-                        class="px-5 py-4 text-gray-400 max-w-xs truncate"
-                        title={r.mcpServerUrl}>{r.mcpServerUrl}</td
-                      >
-                      <td class="px-5 py-4 text-gray-300">{r.contactEmail}</td>
-                      <td class="px-5 py-4 text-center">
-                        {#if r.businessPermitUrl}
-                          <a
-                            href={`/${r.businessPermitUrl}`}
-                            target="_blank"
-                            class="inline-flex text-blue-400 hover:text-blue-300 text-xs font-medium bg-blue-400/10 px-2 py-1 rounded"
-                            >View Permit</a
-                          >
-                        {:else}
-                          <span class="text-gray-600">—</span>
-                        {/if}
-                      </td>
-                      <td class="px-5 py-4">
-                        <div class="flex items-center gap-2 flex-wrap">
-                          {#if r.verified}
-                            <span
-                              class="text-xs font-semibold text-emerald-400 bg-emerald-400/10 px-2.5 py-1 rounded-md border border-emerald-400/20"
-                              >Verified</span
-                            >
-                            {#if !r.active}
-                              <span
-                                class="text-xs font-semibold text-red-400 bg-red-400/10 px-2.5 py-1 rounded-md border border-red-400/20"
-                                >Suspended</span
-                              >
-                            {/if}
-                          {:else}
-                            <span
-                              class="text-xs font-semibold text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded-md border border-amber-400/20"
-                              >Pending</span
-                            >
-                          {/if}
-                        </div>
-                      </td>
-                      <td class="px-5 py-4">
-                        {#if r.platformKey && !r.platformKey.revokedAt}
-                          <div
-                            class="flex items-center gap-1.5 text-xs text-emerald-400 font-medium whitespace-nowrap"
-                          >
-                            <Key size={14} /> Active
-                          </div>
-                        {:else}
-                          <div
-                            class="flex items-center gap-1.5 text-xs text-gray-600 font-medium whitespace-nowrap"
-                          >
-                            <AlertTriangle size={14} /> None
-                          </div>
-                        {/if}
-                      </td>
-                      <td class="px-5 py-4 text-right">
-                        <div
-                          class="flex items-center justify-end gap-2 flex-wrap min-w-[140px]"
-                        >
-                          {#if !r.verified}
-                            <button
-                              onclick={() => verifyStore(r.id)}
-                              class="text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded transition-colors"
-                            >
-                              Verify
-                            </button>
-                          {/if}
-
-                          <button
-                            onclick={() => issueKey(r.id)}
-                            class="text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 border border-gray-700"
-                          >
-                            {#if r.platformKey && !r.platformKey.revokedAt}
-                              <RotateCw size={12} /> Rotate
-                            {:else}
-                              <Key size={12} /> Issue Key
-                            {/if}
-                          </button>
-
-                          {#if r.verified}
-                            {#if r.active}
-                              <button
-                                onclick={() => toggleActive(r.id, false)}
-                                class="text-xs font-medium bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded transition-colors border border-red-500/20"
-                              >
-                                Suspend
-                              </button>
-                            {:else}
-                              <button
-                                onclick={() => toggleActive(r.id, true)}
-                                class="text-xs font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded transition-colors border border-emerald-500/20"
-                              >
-                                Reactivate
-                              </button>
-                            {/if}
-                          {/if}
-                        </div>
-                      </td>
-                    </tr>
-                  {/each}
-                {/if}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      {/if}
+      </div>
     </main>
+  </div>
+{/if}
+
+<!-- Toast UI -->
+{#if toastMsg}
+  <div
+    class="fixed bottom-10 right-10 z-[100] px-8 py-5 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] font-black text-white {toastType ===
+    'success'
+      ? 'bg-gray-900'
+      : 'bg-red-600'} transition-all animate-in slide-in-from-bottom-10 fade-in flex items-center gap-4 min-w-[300px] border border-white/10 backdrop-blur-md"
+  >
+    {#if toastType === "success"}
+      <div class="bg-emerald-500 p-1.5 rounded-full text-white shadow-lg">
+        <CheckCircle2 size={18} strokeWidth={3} />
+      </div>
+    {:else}
+      <div class="bg-white p-1.5 rounded-full text-red-600 shadow-lg">
+        <AlertTriangle size={18} strokeWidth={3} />
+      </div>
+    {/if}
+    <span class="flex-1">{toastMsg}</span>
+    <button
+      class="text-white/40 hover:text-white transition-colors p-1"
+      onclick={() => (toastMsg = "")}><X size={16} strokeWidth={3} /></button
+    >
   </div>
 {/if}
 
 <!-- CONFIRM DIALOG -->
 {#if isConfirmOpen}
   <div
-    class="fixed inset-0 z-100 flex items-center justify-center p-4 sm:p-0 text-gray-100"
+    class="fixed inset-0 z-[200] flex items-center justify-center p-6 text-gray-900 font-sans"
   >
     <div
-      class="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
+      class="fixed inset-0 bg-gray-900/60 backdrop-blur-xl transition-opacity animate-in fade-in duration-300"
       onclick={() => !isConfirming && (isConfirmOpen = false)}
       aria-hidden="true"
     ></div>
 
     <div
-      class="relative bg-[#1c1e26] border border-gray-800 rounded-xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 fade-in duration-200"
+      class="relative bg-white border border-gray-200 rounded-[2.5rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.3)] w-full max-w-lg p-10 md:p-14 animate-in zoom-in-95 fade-in duration-300"
     >
-      <h2 class="text-lg font-semibold text-white mb-2">{confirmTitle}</h2>
-      <p class="text-sm text-gray-400 mb-6">{confirmDesc}</p>
+      <div
+        class="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-10 shadow-sm border border-blue-100"
+      >
+        <Info size={32} strokeWidth={2.5} />
+      </div>
+      <h2
+        class="text-3xl font-black text-gray-900 mb-4 tracking-tight leading-tight"
+      >
+        {confirmTitle}
+      </h2>
+      <p class="text-gray-500 font-medium text-lg mb-10 leading-relaxed">
+        {confirmDesc}
+      </p>
 
-      <div class="flex items-center justify-end gap-3">
+      <div class="flex flex-col sm:flex-row items-center justify-end gap-4">
         <button
           type="button"
           disabled={isConfirming}
           onclick={() => (isConfirmOpen = false)}
-          class="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white bg-gray-800/50 hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-50"
+          class="w-full sm:w-auto px-8 py-5 text-base font-black text-gray-400 hover:text-gray-900 bg-gray-50 hover:bg-gray-100 rounded-2xl transition-all disabled:opacity-50"
         >
           Cancel
         </button>
@@ -749,10 +939,11 @@
           type="button"
           disabled={isConfirming}
           onclick={handleConfirm}
-          class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-70 flex items-center gap-2"
+          class="w-full sm:w-auto px-10 py-5 text-base font-black text-white bg-gray-900 hover:bg-black rounded-2xl transition-all shadow-2xl disabled:opacity-70 flex items-center justify-center gap-3 active:scale-95"
         >
           {#if isConfirming}
-            <Loader2 class="w-4 h-4 animate-spin" /> Confirming...
+            <Loader2 class="w-5 h-5 animate-spin" />
+            <span>Working...</span>
           {:else}
             Confirm
           {/if}
@@ -761,3 +952,17 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #e2e8f0;
+    border-radius: 10px;
+  }
+</style>
