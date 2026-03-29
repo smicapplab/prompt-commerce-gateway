@@ -14,7 +14,7 @@
 # After setup, run `./dev.sh` to start the server.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
 G='\033[0;32m'  # green

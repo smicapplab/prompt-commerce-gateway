@@ -16,7 +16,7 @@
 # Find both URLs in: Supabase Dashboard → Settings → Database → Connection string
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
 G='\033[0;32m'

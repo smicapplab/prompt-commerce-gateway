@@ -19,6 +19,8 @@
 #   pm2 save && pm2 startup
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$DIR"
 
 # ANSI colour codes
 G='\033[0;32m'

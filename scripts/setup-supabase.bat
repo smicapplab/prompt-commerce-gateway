@@ -1,6 +1,6 @@
 @echo off
 TITLE Prompt Commerce Gateway - Supabase Setup
-SET DIR=%~dp0
+SET DIR=%~dp0..\
 
 echo.
 echo   Prompt Commerce Gateway - Supabase Setup
