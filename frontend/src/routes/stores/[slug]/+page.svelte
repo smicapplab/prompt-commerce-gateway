@@ -30,21 +30,38 @@
     }
   }
 
-  async function loadProducts() {
+  let currentPage = $state(1);
+  let hasMore = $state(false);
+
+  async function loadProducts(isLoadMore = false) {
     isLoadingProducts = true;
+    if (!isLoadMore) {
+        currentPage = 1;
+    }
     try {
-      let url = `/api/storefront/stores/${slug}/products?limit=50`;
+      let url = `/api/storefront/stores/${slug}/products?limit=24&page=${currentPage}`;
       if (selectedCategory) url += `&category=${selectedCategory}`;
       if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
       
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        products = data.products;
+        if (isLoadMore) {
+            products = [...products, ...data.products];
+        } else {
+            products = data.products;
+        }
+        hasMore = data.pagination?.hasMore ?? false;
       }
     } finally {
       isLoadingProducts = false;
     }
+  }
+
+  function loadMore() {
+      if (isLoadingProducts || !hasMore) return;
+      currentPage += 1;
+      loadProducts(true);
   }
 
   // Effect to load info when store slug is available
@@ -177,6 +194,18 @@
                 <ProductCard {product} storeSlug={slug} />
               {/each}
             </div>
+            
+            {#if hasMore}
+              <div class="mt-8 flex justify-center">
+                <button 
+                  onclick={loadMore} 
+                  disabled={isLoadingProducts}
+                  class="px-6 py-2.5 rounded-xl bg-[#1c1e26] border border-gray-800 text-gray-300 hover:text-white hover:bg-gray-800 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium disabled:opacity-50"
+                >
+                  {isLoadingProducts ? 'Loading...' : 'Load more products'}
+                </button>
+              </div>
+            {/if}
           {/if}
         </div>
       </div>

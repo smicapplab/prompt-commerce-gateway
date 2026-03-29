@@ -9,8 +9,7 @@ The customer-facing hub of the Prompt Commerce network. The gateway connects ind
 ```
 prompt-commerce-gateway/
   src/
-    auth/           ← JWT auth for admin panel
-    catalog/        ← Product cache (CachedProduct, CachedCategory) + delta sync
+    catalog/        ← Product cache (CachedProduct, CachedCategory) + Unified Search + delta sync
     payments/       ← Payment adapter pattern (Mock / PayMongo / Stripe)
     registry/       ← Retailer registry + gateway key issuance
     settings/       ← Key-value store for bot token, global config
@@ -45,9 +44,24 @@ Customers interact entirely through Telegram. The bot token is stored in the dat
 
 **Free-text search** — typing anything without a command triggers a cross-store search automatically.
 
-### Natural Language Search
+### Public Web Storefront
 
-The bot parses natural language queries to extract filters before hitting the database. No AI call needed — pure regex, zero latency.
+A high-performance SvelteKit interface for customers who prefer browsing in a web browser.
+
+- **Store Directory**: Browse all active retailers in the network.
+- **Storefront Detail**: Dynamic product grids with category filtering and real-time stock status.
+- **Deep Image Resolution**: Gateway dynamically resolves seller-side image uploads to valid absolute URLs.
+- **Optimized Browsing**: Infinite search and "Load More" pagination for a premium, low-latency experience.
+
+### Natural Language Search (Unified)
+
+The gateway parses natural language queries into structured filters (price, stock, keywords). This intelligence is unified in `CatalogService` and shared across the Telegram bot and the Web Storefront.
+
+**Search Engine Features:**
+- **Natural Language Parsing**: Pure regex parsing with zero latency.
+- **Multi-word AND Logic**: `"apple laptop"` matches if every word appears across title, description, SKU, or tags.
+- **High Performance**: PostgreSQL B-Tree indexes on `title` and `[active, price]` for rapid range queries.
+- **Case-Insensitive Tags**: Tags are normalized to lowercase on sync and during search.
 
 | Pattern | Example |
 |---------|---------|
@@ -56,8 +70,6 @@ The bot parses natural language queries to extract filters before hitting the da
 | Price range | `between 500 and 2000`, `500 to 2000`, `500-2000` |
 | Stock filter | `in stock headphones`, `available sneakers` |
 | Intent stripping | `find me a laptop under 50k` → keywords: `laptop`, maxPrice: 50000 |
-
-Search uses multi-word AND logic: `"apple laptop"` splits into `["apple", "laptop"]` and requires every word to appear somewhere across title, description, SKU, or tags.
 
 ### Persistent Shopping Cart
 

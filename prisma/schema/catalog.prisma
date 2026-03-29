@@ -39,5 +39,7 @@ model CachedProduct {
   @@unique([storeSlug, sellerId])
   @@index([storeSlug])
   @@index([storeSlug, categoryId])
+  @@index([title])
+  @@index([active, price])
   @@map("cached_products")
 }

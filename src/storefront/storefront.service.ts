@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 import { CatalogService } from '../catalog/catalog.service';
+import { parseSearchQuery } from '../catalog/parse-search-query';
 
 @Injectable()
 export class StorefrontService {
@@ -71,32 +72,19 @@ export class StorefrontService {
     const { categoryId, search, page = 1, limit = 20, sort } = opts;
     const offset = (page - 1) * limit;
 
-    const where: any = {
-      storeSlug: slug,
-      active: true,
-    };
-    if (categoryId != null) where.categoryId = categoryId;
-    if (search) {
-      where.title = { contains: search, mode: 'insensitive' };
-    }
-
-    let orderBy: any = { title: 'asc' };
-    if (sort === 'price_asc') orderBy = { price: 'asc' };
-    else if (sort === 'price_desc') orderBy = { price: 'desc' };
-    else if (sort === 'newest') orderBy = { syncedAt: 'desc' };
-
-    const [products, total] = await Promise.all([
-      this.prisma.cachedProduct.findMany({
-        where,
-        orderBy,
-        take: limit,
-        skip: offset,
-      }),
-      this.prisma.cachedProduct.count({ where }),
+    const [products, total, store] = await Promise.all([
+      this.catalogService.getProducts(slug, { categoryId, search, sort, limit, offset }),
+      this.catalogService.countProducts(slug, { categoryId, search }),
+      this.prisma.retailer.findUnique({ where: { slug }, select: { mcpServerUrl: true } }),
     ]);
 
+    let baseUrl = '';
+    if (store?.mcpServerUrl) {
+       try { baseUrl = new URL(store.mcpServerUrl).origin; } catch {}
+    }
+
     return {
-      products,
+      products: products.map(p => this._formatImages(p, baseUrl)),
       pagination: {
         total,
         page,
@@ -114,21 +102,47 @@ export class StorefrontService {
   async getProduct(slug: string, sellerId: number) {
       const product = await this.catalogService.getProduct(slug, sellerId);
       if (!product || !product.active) throw new NotFoundException('Product not found');
-      return product;
+
+      const store = await this.prisma.retailer.findUnique({ where: { slug }, select: { mcpServerUrl: true } });
+      let baseUrl = '';
+      if (store?.mcpServerUrl) {
+          try { baseUrl = new URL(store.mcpServerUrl).origin; } catch {}
+      }
+
+      return this._formatImages(product, baseUrl);
   }
 
   async searchCrossStore(opts: { q: string; page?: number; limit?: number; minPrice?: number; maxPrice?: number; inStockOnly?: boolean }) {
       const { q, page = 1, limit = 20, minPrice, maxPrice, inStockOnly } = opts;
       const offset = (page - 1) * limit;
       
-      const filterOpts = { limit, offset, minPrice, maxPrice, inStockOnly };
+      const parsed = parseSearchQuery(q || '');
+
+      const filterOpts = { 
+        limit, 
+        offset, 
+        minPrice: minPrice ?? parsed.minPrice, 
+        maxPrice: maxPrice ?? parsed.maxPrice, 
+        inStockOnly: inStockOnly || parsed.inStockOnly 
+      };
+
       const [products, total] = await Promise.all([
-          this.catalogService.searchAllStores(q, filterOpts),
-          this.catalogService.countSearchAllStores(q, filterOpts)
+          this.catalogService.searchAllStores(parsed.keywords, filterOpts),
+          this.catalogService.countSearchAllStores(parsed.keywords, filterOpts)
       ]);
 
+      const storeSlugs = [...new Set(products.map(p => p.storeSlug))];
+      const stores = await this.prisma.retailer.findMany({
+          where: { slug: { in: storeSlugs } },
+          select: { slug: true, mcpServerUrl: true }
+      });
+      const urlMap = new Map<string, string>();
+      for (const s of stores) {
+          try { urlMap.set(s.slug, new URL(s.mcpServerUrl).origin); } catch { urlMap.set(s.slug, ''); }
+      }
+
       return {
-          products,
+          products: products.map(p => this._formatImages(p, urlMap.get(p.storeSlug) || '')),
           pagination: {
               total,
               page,
@@ -136,6 +150,14 @@ export class StorefrontService {
               totalPages: Math.ceil(total / limit),
               hasMore: offset + limit < total
           }
+      };
+  }
+
+  private _formatImages<T extends { images?: string[] | null }>(product: T, baseUrl: string): T {
+      if (!product || !baseUrl || !product.images) return product;
+      return {
+          ...product,
+          images: product.images.map(img => img.startsWith('/uploads/') ? `${baseUrl}${img}` : img),
       };
   }
 }

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
+import { parseSearchQuery } from './parse-search-query';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 export interface SyncCategoryDto {
@@ -65,7 +66,7 @@ export class CatalogService {
             price:         p.price ?? null,
             stockQuantity: p.stock_quantity ?? 0,
             categoryId:    p.category_id ?? null,
-            tags:          p.tags   ?? [],
+            tags:          p.tags?.map(t => t.toLowerCase()) ?? [],
             images:        p.images ?? [],
             active:        p.active ?? true,
             syncedAt:      new Date(),
@@ -79,7 +80,7 @@ export class CatalogService {
             price:         p.price ?? null,
             stockQuantity: p.stock_quantity ?? 0,
             categoryId:    p.category_id ?? null,
-            tags:          p.tags   ?? [],
+            tags:          p.tags?.map(t => t.toLowerCase()) ?? [],
             images:        p.images ?? [],
             active:        p.active ?? true,
           },
@@ -129,7 +130,7 @@ export class CatalogService {
           price:         p.price ?? null,
           stockQuantity: p.stock_quantity ?? 0,
           categoryId:    p.category_id ?? null,
-          tags:          p.tags ?? [],
+          tags:          p.tags?.map(t => t.toLowerCase()) ?? [],
           images:        p.images ?? [],
           active:        p.active ?? true,
         })),
@@ -148,21 +149,56 @@ export class CatalogService {
     });
   }
 
+  private _buildStoreProductsWhere(storeSlug: string, categoryId?: number, search?: string) {
+    let where: any = { storeSlug, active: true };
+    if (categoryId != null) where.categoryId = categoryId;
+    
+    if (search) {
+      const parsed = parseSearchQuery(search);
+      const searchWhere = this._buildSearchWhere(parsed.keywords, {
+        maxPrice: parsed.maxPrice,
+        minPrice: parsed.minPrice,
+        inStockOnly: parsed.inStockOnly,
+      });
+      const combinedAnd = [...(where.AND || []), ...(searchWhere.AND || [])];
+      where = { 
+        ...where, 
+        ...searchWhere, 
+      };
+      if (combinedAnd.length > 0) {
+        where.AND = combinedAnd;
+      } else {
+        delete where.AND;
+      }
+    }
+    return where;
+  }
+
   async getProducts(
     storeSlug: string,
-    opts: { categoryId?: number; search?: string; limit?: number; offset?: number } = {},
+    opts: { categoryId?: number; search?: string; limit?: number; offset?: number; sort?: string } = {},
   ) {
-    const { categoryId, search, limit = 20, offset = 0 } = opts;
+    const { categoryId, search, limit = 20, offset = 0, sort } = opts;
+    
+    let orderBy: any = { title: 'asc' };
+    if (sort === 'price_asc') orderBy = { price: 'asc' };
+    else if (sort === 'price_desc') orderBy = { price: 'desc' };
+    else if (sort === 'newest') orderBy = { syncedAt: 'desc' };
+
     return this.prisma.cachedProduct.findMany({
-      where: {
-        storeSlug,
-        active: true,
-        ...(categoryId != null ? { categoryId } : {}),
-        ...(search ? { title: { contains: search, mode: 'insensitive' as const } } : {}),
-      },
-      orderBy: { title: 'asc' },
+      where: this._buildStoreProductsWhere(storeSlug, categoryId, search),
+      orderBy,
       take: limit,
       skip: offset,
+    });
+  }
+
+  async countProducts(
+    storeSlug: string,
+    opts: { categoryId?: number; search?: string } = {},
+  ) {
+    return this.prisma.cachedProduct.count({
+      where: this._buildStoreProductsWhere(storeSlug, opts.categoryId, opts.search)
     });
   }
 
@@ -190,6 +226,24 @@ export class CatalogService {
       take: limit,
       skip: offset,
     });
+  }
+
+  async smartSearch(rawQuery: string, opts: { limit?: number; offset?: number } = {}) {
+    const parsed = parseSearchQuery(rawQuery || '');
+    const filterOpts = {
+      limit: opts.limit,
+      offset: opts.offset,
+      maxPrice: parsed.maxPrice,
+      minPrice: parsed.minPrice,
+      inStockOnly: parsed.inStockOnly,
+    };
+    
+    const [results, total] = await Promise.all([
+      this.searchAllStores(parsed.keywords, filterOpts),
+      this.countSearchAllStores(parsed.keywords, filterOpts),
+    ]);
+    
+    return { results, total, parsed };
   }
 
   async countSearchAllStores(
@@ -225,7 +279,7 @@ export class CatalogService {
             { title:       { contains: word, mode: 'insensitive' as const } },
             { description: { contains: word, mode: 'insensitive' as const } },
             { sku:         { contains: word, mode: 'insensitive' as const } },
-            { tags:        { has: word } },
+            { tags:        { has: word.toLowerCase() } },
           ],
         }))
       : undefined;
