@@ -7,19 +7,27 @@
       <h1 class="text-3xl font-bold mb-2">Prompt Commerce</h1>
       <p class="text-gray-400 mb-8">Gateway Portal</p>
     </div>
-    <div class="grid grid-cols-2 gap-4 mb-8">
+    <div class="flex flex-col gap-3 mb-8">
       <a
-        href="/register"
-        class="bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl font-medium transition-colors"
+        href="/stores"
+        class="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white py-4 px-6 rounded-xl font-bold transition-transform hover:scale-[1.02] active:scale-95 shadow-lg flex items-center justify-center gap-2"
       >
-        Register Store
+        Browse Stores
       </a>
-      <a
-        href="/admin"
-        class="bg-gray-800 hover:bg-gray-700 text-white py-3 px-4 rounded-xl font-medium transition-colors"
-      >
-        Admin Login
-      </a>
+      <div class="grid grid-cols-2 gap-3">
+        <a
+          href="/register"
+          class="bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl font-medium transition-colors"
+        >
+          Register Store
+        </a>
+        <a
+          href="/admin"
+          class="bg-[#242731] hover:bg-gray-700 border border-gray-700 text-white py-3 px-4 rounded-xl font-medium transition-colors"
+        >
+          Admin Login
+        </a>
+      </div>
     </div>
 
     <div class="border-t border-gray-800 pt-8 text-left">

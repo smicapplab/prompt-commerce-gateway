@@ -22,7 +22,7 @@ export async function callRetailerTool(
     { capabilities: {} },
   );
 
-  const sseUrl = new URL(`${retailer.mcpServerUrl}/sse`);
+  const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
 
   const transport = new SSEClientTransport(sseUrl, {
     requestInit: {
@@ -52,7 +52,7 @@ export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
   );
 
   const transport = new SSEClientTransport(
-    new URL(`${retailer.mcpServerUrl}/sse`),
+    new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`),
     { requestInit: { headers: { 'x-gateway-key': retailer.platformKey } } },
   );
 

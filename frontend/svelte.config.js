@@ -10,6 +10,11 @@ const config = {
 		}),
 		alias: {
 			$prisma: '../src/generated/client'
+		},
+		prerender: {
+			entries: ['*'],
+			handleUnseenRoutes: 'ignore',
+			handleHttpError: 'ignore'
 		}
 	}
 };
