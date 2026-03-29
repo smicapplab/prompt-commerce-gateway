@@ -4,7 +4,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { PrismaClient, Retailer } from '../generated/client';
+import { PrismaClient, Retailer } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 import { KeysService } from '../keys/keys.service';
 import { MailService } from '../mail/mail.service';

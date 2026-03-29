@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PRISMA } from '../prisma/prisma.module';
-import type { PrismaClient } from '../generated/client';
+import type { PrismaClient } from '@prisma/client';
 
 export interface CartItem {
   productId: number;

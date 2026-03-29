@@ -2,7 +2,7 @@
 // Resolves the correct gateway adapter per store and manages Payment DB records.
 
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaClient } from '../generated/client';
+import { PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 import { MockGateway } from './adapters/mock.gateway';
 import { PayMongoGateway } from './adapters/paymongo.gateway';
