@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
+import { CatalogService } from '../catalog/catalog.service';
 import {
   GoogleGenerativeAI,
   type FunctionDeclaration,
@@ -19,7 +20,7 @@ export interface StoreAiConfig {
 }
 
 const DEFAULT_MODELS: Record<string, string> = {
-  claude: 'claude-haiku-4-5-20251001',
+  claude: 'claude-3-5-haiku-20241022',
   gemini: 'gemini-1.5-flash',
   openai: 'gpt-4o-mini',
 };
@@ -119,6 +120,8 @@ const MAX_HISTORY = 20;
 export class AiChatService {
   private readonly logger = new Logger(AiChatService.name);
 
+  constructor(private readonly catalog: CatalogService) {}
+
   clearHistory(userId: number, storeSlug: string): void {
     histories.delete(`${userId}:${storeSlug}`);
   }
@@ -131,6 +134,8 @@ export class AiChatService {
     userMessage: string,
     config: StoreAiConfig,
   ): Promise<string> {
+    this.logger.log(`[AiChat] Message from user ${userId} for store ${storeSlug}: "${userMessage}"`);
+
     if (config.provider === 'gemini') {
       return this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config);
     }
@@ -360,22 +365,61 @@ export class AiChatService {
     args: Record<string, unknown>,
     config?: StoreAiConfig,
   ): Promise<string> {
+    const startTime = Date.now();
+    this.logger.log(`[AiChat] Tool Call: ${toolName} with args: ${JSON.stringify(args)}`);
+
     // fetch_url and search_images are handled locally — no MCP hop needed
     if (toolName === 'fetch_url') {
-      return this.fetchUrl(args.url as string);
+      const result = await this.fetchUrl(args.url as string);
+      this.logger.log(`[AiChat] Tool Success: ${toolName} in ${Date.now() - startTime}ms`);
+      return result;
     }
     if (toolName === 'search_images') {
       if (!config?.serperApiKey) {
         return 'Image search is not configured for this store. Ask the store owner to add a Serper API key in Settings → AI/LLM.';
       }
-      return this.searchImages(args.query as string, (args.num as number) ?? 5, config.serperApiKey);
+      const result = await this.searchImages(args.query as string, (args.num as number) ?? 5, config.serperApiKey);
+      this.logger.log(`[AiChat] Tool Success: ${toolName} in ${Date.now() - startTime}ms`);
+      return result;
+    }
+
+    // fallback for search_products using the local PostgreSQL cache
+    if (toolName === 'search_products') {
+      try {
+        const query = (args.query as string) || '';
+        const limit = (args.limit as number) || 10;
+        const products = await this.catalog.getProducts(retailer.slug, { 
+          search: query, 
+          limit 
+        });
+
+        if (products.length > 0) {
+          this.logger.log(`[AiChat] Tool Success (Cache): ${toolName} found ${products.length} items in ${Date.now() - startTime}ms`);
+          return JSON.stringify({
+            source: 'cache',
+            products: products.map(p => ({
+              id: p.sellerId,
+              title: p.title,
+              price: p.price,
+              sku: p.sku,
+              stock: p.stockQuantity,
+              images: p.images,
+            }))
+          });
+        }
+        this.logger.log(`[AiChat] Tool: ${toolName} not found in cache, falling back to live MCP...`);
+      } catch (err) {
+        this.logger.warn(`[AiChat] Local search_products failed: ${err}. Falling back to live MCP.`);
+      }
     }
 
     try {
       const result = await callRetailerTool(retailer, toolName, args) as any;
-      return result?.content?.map((c: any) => c.text ?? '').join('\n') ?? JSON.stringify(result);
+      const text = result?.content?.map((c: any) => c.text ?? '').join('\n') ?? JSON.stringify(result);
+      this.logger.log(`[AiChat] Tool Success: ${toolName} in ${Date.now() - startTime}ms`);
+      return text;
     } catch (err) {
-      this.logger.warn(`Tool "${toolName}" failed: ${err}`);
+      this.logger.warn(`[AiChat] Tool "${toolName}" failed after ${Date.now() - startTime}ms: ${err}`);
       return `Error calling ${toolName}: ${err instanceof Error ? err.message : 'unknown error'}`;
     }
   }

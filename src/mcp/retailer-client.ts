@@ -32,12 +32,18 @@ export async function callRetailerTool(
     },
   });
 
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`MCP timeout after 10s calling "${toolName}"`)), 10000)
+  );
+
   try {
-    await client.connect(transport);
-    const result = await client.callTool({ name: toolName, arguments: args });
-    return result;
+    const callPromise = (async () => {
+      await client.connect(transport);
+      return await client.callTool({ name: toolName, arguments: args });
+    })();
+    return await Promise.race([callPromise, timeoutPromise]);
   } finally {
-    await client.close().catch(() => {/* ignore close errors */});
+    await client.close().catch(() => {});
   }
 }
 
@@ -56,10 +62,17 @@ export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
     { requestInit: { headers: { 'x-gateway-key': retailer.platformKey } } },
   );
 
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('MCP timeout after 10s during ping')), 10000)
+  );
+
   try {
-    await client.connect(transport);
-    await client.listTools();
-    return true;
+    const pingPromise = (async () => {
+      await client.connect(transport);
+      await client.listTools();
+      return true;
+    })();
+    return await Promise.race([pingPromise, timeoutPromise]) as boolean;
   } catch {
     return false;
   } finally {

@@ -16,7 +16,7 @@
 
   let selectedCategory = $state<number | null>(null);
   let searchQuery = $state("");
-  let prevSearchQuery = searchQuery;
+  let prevSearchQuery = $state("");
 
   // Handlers
   async function loadStoreInfo() {
