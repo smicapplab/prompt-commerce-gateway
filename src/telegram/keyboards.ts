@@ -80,7 +80,20 @@ export function productDetailKeyboard(
 ): InlineKeyboard {
   return new InlineKeyboard()
     .text('🛒 Add to Cart', CB.addCart(slug, productId)).row()
-    .text('⬅️ Back to list', CB.page(slug, catId, page));
+    .text('🛍 View Cart', CB.cart(slug))
+    .text('⬅️ Back', CB.page(slug, catId, page));
+}
+
+// ─── Product detail (from search context) ─────────────────────────────────────
+// "Back to Search" re-paginates from offset 0 using stored search query.
+export function productDetailSearchKeyboard(
+  slug: string,
+  productId: number,
+): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('🛒 Add to Cart', CB.addCart(slug, productId)).row()
+    .text('🛍 View Cart', CB.cart(slug))
+    .text('🔍 Back to Search', 'srch:0');
 }
 
 // ─── Cart ─────────────────────────────────────────────────────────────────────

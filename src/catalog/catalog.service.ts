@@ -237,13 +237,81 @@ export class CatalogService {
       minPrice: parsed.minPrice,
       inStockOnly: parsed.inStockOnly,
     };
-    
-    const [results, total] = await Promise.all([
+
+    // Strategy 1: strict AND — every keyword must appear in title/desc/sku/tags
+    let [results, total] = await Promise.all([
       this.searchAllStores(parsed.keywords, filterOpts),
       this.countSearchAllStores(parsed.keywords, filterOpts),
     ]);
-    
-    return { results, total, parsed };
+
+    // Strategy 2: OR fallback — any keyword matches (catches partial/synonym matches)
+    let fallback = false;
+    if (total === 0 && parsed.keywords.trim()) {
+      [results, total] = await Promise.all([
+        this.searchAllStoresOr(parsed.keywords, filterOpts),
+        this.countSearchAllStoresOr(parsed.keywords, filterOpts),
+      ]);
+      if (total > 0) fallback = true;
+    }
+
+    return { results, total, parsed, fallback };
+  }
+
+  // OR search: any keyword matches across title, description, sku, or tags
+  async searchAllStoresOr(
+    query: string,
+    opts: {
+      limit?:       number;
+      offset?:      number;
+      maxPrice?:    number;
+      minPrice?:    number;
+      inStockOnly?: boolean;
+    } = {},
+  ) {
+    const { limit = 20, offset = 0, maxPrice, minPrice, inStockOnly } = opts;
+    return this.prisma.cachedProduct.findMany({
+      where: this._buildSearchWhereOr(query, { maxPrice, minPrice, inStockOnly }),
+      orderBy: [{ price: 'asc' }, { title: 'asc' }],
+      take: limit,
+      skip: offset,
+    });
+  }
+
+  async countSearchAllStoresOr(
+    query: string,
+    opts: { maxPrice?: number; minPrice?: number; inStockOnly?: boolean } = {},
+  ): Promise<number> {
+    return this.prisma.cachedProduct.count({
+      where: this._buildSearchWhereOr(query, opts),
+    });
+  }
+
+  private _buildSearchWhereOr(
+    query: string,
+    opts: { maxPrice?: number; minPrice?: number; inStockOnly?: boolean },
+  ) {
+    const { maxPrice, minPrice, inStockOnly } = opts;
+    const priceFilter: Record<string, number> = {};
+    if (minPrice != null) priceFilter.gte = minPrice;
+    if (maxPrice != null) priceFilter.lte = maxPrice;
+
+    // OR search: any word matches in any field
+    const words = query.trim().split(/\s+/).filter(Boolean);
+    const textOr = words.length
+      ? words.flatMap((word) => [
+          { title:       { contains: word, mode: 'insensitive' as const } },
+          { description: { contains: word, mode: 'insensitive' as const } },
+          { sku:         { contains: word, mode: 'insensitive' as const } },
+          { tags:        { hasSome: [word.toLowerCase()] } },
+        ])
+      : [];
+
+    return {
+      active: true,
+      ...(Object.keys(priceFilter).length ? { price: priceFilter } : {}),
+      ...(inStockOnly ? { stockQuantity: { gt: 0 } } : {}),
+      ...(textOr.length ? { OR: textOr } : {}),
+    };
   }
 
   async countSearchAllStores(

@@ -9,8 +9,8 @@ import { AiChatService, type StoreAiConfig } from './ai-chat.service';
 import { CartService } from './cart.service';
 import type { PaymentService } from '../payments/payment.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
-         productListKeyboard, productDetailKeyboard, cartKeyboard,
-         emptyCartKeyboard, aiModeKeyboard, backKeyboard } from './keyboards';
+         productListKeyboard, productDetailKeyboard, productDetailSearchKeyboard,
+         cartKeyboard, emptyCartKeyboard, aiModeKeyboard, backKeyboard } from './keyboards';
 import { esc, price, productDetail, cartSummary, orderConfirmation,
          welcomeMessage, storeMenuMessage, aiGreeting } from './formatters';
 
@@ -42,6 +42,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private aiSessions       = new Map<number, AiState>();
   private searchQueries    = new Map<number, string>();  // userId → last search query
   private lastOrderAt      = new Map<number, number>();  // userId → epoch ms of last order
+  private lastStoreSlug    = new Map<number, string>();  // userId → most recently visited store slug
 
   constructor(
     private readonly registry: RegistryService,
@@ -186,10 +187,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const userId = ctx.from?.id;
       if (!userId) return;
 
-      // Find which store the user last interacted with via AI session or prompt them
-      const aiState = this.aiSessions.get(userId);
-      const checkoutState = this.checkoutSessions.get(userId);
-      const slug = aiState?.storeSlug ?? checkoutState?.storeSlug;
+      // Resolve store: active session → last viewed store → prompt user
+      const slug =
+        this.aiSessions.get(userId)?.storeSlug ??
+        this.checkoutSessions.get(userId)?.storeSlug ??
+        this.lastStoreSlug.get(userId);
 
       if (!slug) {
         await ctx.reply('Please select a store first with /stores.');
@@ -429,8 +431,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     edit = false,
   ): Promise<void> {
     const PAGE = 8;
+    const userId = ctx.from?.id as number | undefined;
 
-    const { results, total, parsed } = await this.catalog.smartSearch(rawQuery, { limit: PAGE, offset });
+    const { results, total, parsed, fallback } = await this.catalog.smartSearch(rawQuery, { limit: PAGE, offset });
     const { keywords, maxPrice, minPrice, inStockOnly } = parsed;
 
     // ── Build header ────────────────────────────────────────────────────────
@@ -452,25 +455,36 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    const hasAnyImages = results.some((p: any) => p.images?.length > 0);
+    const fallbackNote = fallback ? `\n<i>💡 No exact matches — showing similar results</i>` : '';
+
     const lines: string[] = [
-      `🔍 ${label} — ${total} result${total !== 1 ? 's' : ''} across all stores\n`,
+      `🔍 ${label} — ${total} result${total !== 1 ? 's' : ''} across all stores${fallbackNote}\n`,
     ];
     for (const p of results) {
       const priceStr = p.price != null ? `₱${p.price.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : 'Price TBD';
       const stock    = p.stockQuantity > 0 ? '' : ' <i>(out of stock)</i>';
-      lines.push(`• <b>${esc(p.title)}</b>${stock}\n  ${priceStr} — <i>${esc(p.storeSlug)}</i>`);
+      const imgIcon  = p.images?.length > 0 ? '📷 ' : '';
+      lines.push(`• ${imgIcon}<b>${esc(p.title)}</b>${stock}\n  ${priceStr} — <i>${esc(p.storeSlug)}</i>`);
     }
+    if (hasAnyImages) lines.push('\n<i>📷 = has photo — tap product to view</i>');
 
-    // Pagination keyboard
+    // Pagination + product buttons keyboard
     const keyboard = new InlineKeyboard();
     const hasPrev = offset > 0;
     const hasNext = offset + PAGE < total;
     if (hasPrev) keyboard.text('← Prev', `srch:${offset - PAGE}`);
     if (hasNext) keyboard.text('Next →', `srch:${offset + PAGE}`);
-    keyboard.row();
+    if (hasPrev || hasNext) keyboard.row();
     for (const p of results) {
-      keyboard.text(`🛒 ${p.title.slice(0, 20)}`, `p:${p.storeSlug}:${p.sellerId}`).row();
+      const icon = p.images?.length > 0 ? '📷 ' : '👁 ';
+      keyboard.text(`${icon}${p.title.slice(0, 22)}`, `p:${p.storeSlug}:${p.sellerId}`).row();
     }
+    // Show View Cart shortcut if user has a known active store
+    const cartSlug = userId
+      ? (this.aiSessions.get(userId)?.storeSlug ?? this.lastStoreSlug.get(userId))
+      : undefined;
+    if (cartSlug) keyboard.text('🛍 View Cart', CB.cart(cartSlug));
 
     const text = lines.join('\n');
     if (edit) {
@@ -576,38 +590,68 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Send product detail ────────────────────────────────────────────────────
   private async sendProductDetail(ctx: any, slug: string, productId: number): Promise<void> {
-    const retailer = await this.getRetailer(slug);
-    const result = await callRetailerTool(retailer, 'get_product', { id: productId }) as any;
-    const text = result?.content?.[0]?.text ?? '{}';
-    let product: any = {};
-    try { product = JSON.parse(text); } catch { /* empty */ }
+    const userId = ctx.from?.id as number | undefined;
 
-    if (!product.id) {
-      await ctx.editMessageText('Product not found.', { reply_markup: backKeyboard(slug) });
+    // ── 1. Resolve product: gateway cache first (fast), MCP fallback ──────────
+    let product: any = null;
+    const cached = await this.catalog.getProduct(slug, productId);
+    if (cached) {
+      product = {
+        id:             cached.sellerId,
+        title:          cached.title,
+        description:    cached.description,
+        price:          cached.price,
+        stock_quantity: cached.stockQuantity,
+        sku:            cached.sku,
+        tags:           cached.tags,
+        images:         cached.images,
+      };
+    } else {
+      // Live MCP call as fallback when product not in cache
+      try {
+        const retailer = await this.getRetailer(slug);
+        const result   = await callRetailerTool(retailer, 'get_product', { id: productId }) as any;
+        const raw      = result?.content?.[0]?.text ?? '{}';
+        product = JSON.parse(raw);
+      } catch { /* product stays null */ }
+    }
+
+    if (!product?.id) {
+      try { await ctx.editMessageText('Product not found.', { reply_markup: backKeyboard(slug) }); }
+      catch { await ctx.reply('Product not found.', { reply_markup: backKeyboard(slug) }); }
       return;
     }
 
-    const msg = productDetail(product);
+    // ── 2. Track last store for /cart command ─────────────────────────────────
+    if (userId) this.lastStoreSlug.set(userId, slug);
 
-    // If product has images, try to send a photo
-    const imageUrl = product.images?.[0];
+    // ── 3. Build message text ─────────────────────────────────────────────────
+    // Use Telegram's invisible-link-preview trick:
+    // An anchor tag with a zero-width-space (&#8203;) as text causes Telegram to
+    // display the image as a preview thumbnail while keeping the message as text.
+    // This avoids the replyWithPhoto approach which breaks editMessageText flows.
+    let msg = productDetail(product);
+    const imageUrl = Array.isArray(product.images)
+      ? product.images[0]
+      : (product.image_url as string | undefined);
     if (imageUrl?.startsWith('http')) {
-      try {
-        await ctx.replyWithPhoto(imageUrl, {
-          caption: msg,
-          parse_mode: 'HTML',
-          reply_markup: productDetailKeyboard(slug, productId, 'all', 0),
-        });
-        return;
-      } catch {
-        // Fall through to text if photo fails
-      }
+      msg = `<a href="${imageUrl}">&#8203;</a>${msg}`;
     }
 
-    await ctx.editMessageText(msg, {
-      parse_mode: 'HTML',
-      reply_markup: productDetailKeyboard(slug, productId, 'all', 0),
-    });
+    // ── 4. Choose keyboard based on context ───────────────────────────────────
+    // If the user has an active search query, offer "Back to Search" instead of
+    // the generic category-list back button.
+    const keyboard = (userId && this.searchQueries.has(userId))
+      ? productDetailSearchKeyboard(slug, productId)
+      : productDetailKeyboard(slug, productId, 'all', 0);
+
+    // ── 5. Edit the existing message (stays as text → all nav works) ──────────
+    try {
+      await ctx.editMessageText(msg, { parse_mode: 'HTML', reply_markup: keyboard });
+    } catch {
+      // Fallback: send new message (e.g. triggered from a non-inline context)
+      await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: keyboard });
+    }
   }
 
   // ─── Add to cart ────────────────────────────────────────────────────────────
