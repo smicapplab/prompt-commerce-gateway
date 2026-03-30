@@ -32,9 +32,10 @@ export async function callRetailerTool(
     },
   });
 
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`MCP timeout after 10s calling "${toolName}"`)), 10000)
-  );
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(`MCP timeout after 10s calling "${toolName}"`)), 10000);
+  });
 
   try {
     const callPromise = (async () => {
@@ -43,6 +44,7 @@ export async function callRetailerTool(
     })();
     return await Promise.race([callPromise, timeoutPromise]);
   } finally {
+    clearTimeout(timeoutHandle!);
     await client.close().catch(() => {});
   }
 }
@@ -62,9 +64,10 @@ export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
     { requestInit: { headers: { 'x-gateway-key': retailer.platformKey } } },
   );
 
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('MCP timeout after 10s during ping')), 10000)
-  );
+  let timeoutHandle: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error('MCP timeout after 10s during ping')), 10000);
+  });
 
   try {
     const pingPromise = (async () => {
@@ -76,6 +79,7 @@ export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
   } catch {
     return false;
   } finally {
+    clearTimeout(timeoutHandle!);
     await client.close().catch(() => {});
   }
 }

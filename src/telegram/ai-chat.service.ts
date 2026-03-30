@@ -386,11 +386,17 @@ export class AiChatService {
     // fallback for search_products using the local PostgreSQL cache
     if (toolName === 'search_products') {
       try {
-        const query = (args.query as string) || '';
+        // Embed price constraints into the search string so parseSearchQuery picks them up
+        let searchStr = (args.query as string) || '';
+        const minPrice = args.min_price as number | undefined;
+        const maxPrice = args.max_price as number | undefined;
+        if (minPrice != null) searchStr += ` above ${minPrice}`;
+        if (maxPrice != null) searchStr += ` under ${maxPrice}`;
+
         const limit = (args.limit as number) || 10;
-        const products = await this.catalog.getProducts(retailer.slug, { 
-          search: query, 
-          limit 
+        const products = await this.catalog.getProducts(retailer.slug, {
+          search: searchStr.trim() || undefined,
+          limit,
         });
 
         if (products.length > 0) {
@@ -400,6 +406,7 @@ export class AiChatService {
             products: products.map(p => ({
               id: p.sellerId,
               title: p.title,
+              description: p.description,
               price: p.price,
               sku: p.sku,
               stock: p.stockQuantity,
