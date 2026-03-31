@@ -10,6 +10,7 @@ export const CB = {
   cats:     (slug: string)                => `cats:${slug}`,
   cat:      (slug: string, id: number)    => `c:${slug}:${id}`,
   prod:     (slug: string, id: number)    => `p:${slug}:${id}`,
+  qty:      (slug: string, id: number)    => `qty:${slug}:${id}`,
   addCart:  (slug: string, id: number)    => `a:${slug}:${id}`,
   rmCart:   (slug: string, id: number)    => `r:${slug}:${id}`,
   cart:     (slug: string)                => `cart:${slug}`,
@@ -79,7 +80,7 @@ export function productDetailKeyboard(
   page: number,
 ): InlineKeyboard {
   return new InlineKeyboard()
-    .text('🛒 Add to Cart', CB.addCart(slug, productId)).row()
+    .text('🛒 Add to Cart', CB.qty(slug, productId)).row()
     .text('🛍 View Cart', CB.cart(slug))
     .text('⬅️ Back', CB.page(slug, catId, page));
 }
@@ -91,9 +92,20 @@ export function productDetailSearchKeyboard(
   productId: number,
 ): InlineKeyboard {
   return new InlineKeyboard()
-    .text('🛒 Add to Cart', CB.addCart(slug, productId)).row()
+    .text('🛒 Add to Cart', CB.qty(slug, productId)).row()
     .text('🛍 View Cart', CB.cart(slug))
     .text('🔍 Back to Search', 'srch:0');
+}
+
+// ─── Quantity selection ───────────────────────────────────────────────────────
+export function quantityKeyboard(slug: string, productId: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('1', `a:${slug}:${productId}:1`)
+    .text('2', `a:${slug}:${productId}:2`)
+    .text('3', `a:${slug}:${productId}:3`)
+    .text('4', `a:${slug}:${productId}:4`)
+    .text('5', `a:${slug}:${productId}:5`).row()
+    .text('⬅️ Cancel', CB.prod(slug, productId));
 }
 
 // ─── Cart ─────────────────────────────────────────────────────────────────────

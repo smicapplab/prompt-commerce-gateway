@@ -13,7 +13,8 @@ import { ConversationService } from '../chat/conversation.service';
 import type { PaymentService } from '../payments/payment.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
          productListKeyboard, productDetailKeyboard, productDetailSearchKeyboard,
-         cartKeyboard, emptyCartKeyboard, aiModeKeyboard, backKeyboard } from './keyboards';
+         cartKeyboard, emptyCartKeyboard, aiModeKeyboard, backKeyboard,
+         quantityKeyboard } from './keyboards';
 import { esc, price, productDetail, cartSummary, orderConfirmation,
          welcomeMessage, storeMenuMessage, aiGreeting } from './formatters';
 
@@ -356,10 +357,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // a:<slug>:<productId> — add to cart
+        // a:<slug>:<productId>:<qty> — add to cart
         if (data.startsWith('a:')) {
+          const [, slug, productId, qtyStr] = data.split(':');
+          await this.addToCart(ctx, userId, slug, parseInt(productId), qtyStr ? parseInt(qtyStr) : 1);
+          return;
+        }
+
+        // qty:<slug>:<productId> — ask for quantity
+        if (data.startsWith('qty:')) {
           const [, slug, productId] = data.split(':');
-          await this.addToCart(ctx, userId, slug, parseInt(productId));
+          await ctx.editMessageReplyMarkup({ reply_markup: quantityKeyboard(slug, parseInt(productId)) });
           return;
         }
 
@@ -535,12 +543,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const lines: string[] = [
       `🔍 ${label} — ${total} result${total !== 1 ? 's' : ''} across all stores${fallbackNote}\n`,
     ];
-    for (const p of results) {
-      const priceStr = p.price != null ? `₱${p.price.toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : 'Price TBD';
-      const stock    = p.stockQuantity > 0 ? '' : ' <i>(out of stock)</i>';
-      const imgIcon  = p.images?.length > 0 ? '📷 ' : '';
-      lines.push(`• ${imgIcon}<b>${esc(p.title)}</b>${stock}\n  ${priceStr} — <i>${esc(p.storeSlug)}</i>`);
-    }
+
     if (hasAnyImages) lines.push('\n<i>📷 = has photo — tap product to view</i>');
 
     // Pagination + product buttons keyboard
@@ -552,7 +555,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (hasPrev || hasNext) keyboard.row();
     for (const p of results) {
       const icon = p.images?.length > 0 ? '📷 ' : '👁 ';
-      keyboard.text(`${icon}${p.title.slice(0, 22)}`, `p:${p.storeSlug}:${p.sellerId}`).row();
+      const priceStr = p.price != null ? `₱${p.price.toLocaleString('en-PH', { minimumFractionDigits: 0 })}` : 'TBD';
+      keyboard.text(`${icon}[${priceStr}] ${p.title.slice(0, 25)}`, `p:${p.storeSlug}:${p.sellerId}`).row();
     }
     // Show View Cart shortcut if user has a known active store
     const cartSlug = userId
@@ -729,7 +733,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ─── Add to cart ────────────────────────────────────────────────────────────
-  private async addToCart(ctx: any, userId: string, slug: string, productId: number): Promise<void> {
+  private async addToCart(ctx: any, userId: string, slug: string, productId: number, qty: number = 1): Promise<void> {
     let product: any = {};
 
     // Try gateway cache first (fast); fall back to live MCP call
@@ -766,7 +770,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       productId: product.id,
       title:     product.title,
       price:     product.price ?? 0,
-    });
+    }, qty);
 
     // Track last store so /cart command works after adding from global search
     this.lastStoreSlug.set(userId, slug);
