@@ -1,0 +1,14 @@
+// ─── Telegram users (customers) ──────────────────────────────────────────────
+// Stores global state for users interacting with the Telegram bot.
+model TelegramUser {
+  id              String    @id // Telegram user ID (as string)
+  username        String?
+  firstName       String?   @map("first_name")
+  lastName        String?   @map("last_name")
+  lastOrderAt     DateTime? @map("last_order_at")
+  lastSearchQuery String?   @map("last_search_query")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("telegram_users")
+}

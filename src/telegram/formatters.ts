@@ -1,4 +1,4 @@
-import type { CartItem } from './cart.store';
+import type { CartItem } from './cart.service';
 
 // ─── Escape HTML for Telegram HTML parse mode ─────────────────────────────────
 export function esc(text: string | null | undefined): string {

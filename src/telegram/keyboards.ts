@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import type { CartItem } from './cart.store';
+import type { CartItem } from './cart.service';
 
 // ─── Callback data prefixes ───────────────────────────────────────────────────
 // All must stay ≤ 64 bytes total (Telegram limit).

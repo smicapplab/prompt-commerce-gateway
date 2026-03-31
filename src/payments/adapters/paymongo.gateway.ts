@@ -107,6 +107,14 @@ export class PayMongoGateway implements PaymentGateway {
 
       if (!timestamp || !sig) return Promise.resolve(null);
 
+      // Webhook Replay Attack Protection: Check timestamp tolerance (5 mins)
+      const ts = parseInt(timestamp, 10);
+      const now = Math.floor(Date.now() / 1000);
+      if (Math.abs(now - ts) > 300) {
+        this.logger.warn(`PayMongo webhook timestamp out of range: ${ts} (now: ${now})`);
+        return Promise.resolve(null);
+      }
+
       // Recompute expected signature
       const toSign = `${timestamp}.${rawBody}`;
       const expected = crypto

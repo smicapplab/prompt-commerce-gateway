@@ -101,42 +101,67 @@ export class CatalogService {
   }
 
   // ── Full snapshot (legacy / fallback) ──────────────────────────────────────
-  // Deletes everything for the store and re-inserts from scratch.
   // Used when the payload has top-level { categories, products } (old format).
+  // Uses an upsert-then-prune strategy to avoid an "empty-catalog read window"
+  // during sync.
   async fullSnapshot(
     storeSlug: string,
     categories: SyncCategoryDto[],
     products: SyncProductDto[],
   ): Promise<{ categories: number; products: number }> {
-    await this.prisma.$transaction([
-      this.prisma.cachedCategory.deleteMany({ where: { storeSlug } }),
-      this.prisma.cachedProduct.deleteMany({ where: { storeSlug } }),
-      this.prisma.cachedCategory.createMany({
-        data: categories.map(c => ({
-          storeSlug,
-          sellerId:  c.id,
-          name:      c.name,
-          parentId:  c.parent_id ?? null,
-        })),
-        skipDuplicates: true,
-      }),
-      this.prisma.cachedProduct.createMany({
-        data: products.map(p => ({
-          storeSlug,
-          sellerId:      p.id,
-          title:         p.title,
-          description:   p.description ?? null,
-          sku:           p.sku ?? null,
-          price:         p.price ?? null,
-          stockQuantity: p.stock_quantity ?? 0,
-          categoryId:    p.category_id ?? null,
-          tags:          p.tags?.map(t => t.toLowerCase()) ?? [],
-          images:        p.images ?? [],
-          active:        p.active ?? true,
-        })),
-        skipDuplicates: true,
-      }),
-    ]);
+    const now = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Upsert all categories with new timestamp
+      for (const c of categories) {
+        await tx.cachedCategory.upsert({
+          where: { storeSlug_sellerId: { storeSlug, sellerId: c.id } },
+          update: { name: c.name, parentId: c.parent_id ?? null, syncedAt: now },
+          create: { storeSlug, sellerId: c.id, name: c.name, parentId: c.parent_id ?? null, syncedAt: now },
+        });
+      }
+
+      // 2. Upsert all products with new timestamp
+      for (const p of products) {
+        await tx.cachedProduct.upsert({
+          where: { storeSlug_sellerId: { storeSlug, sellerId: p.id } },
+          update: {
+            title:         p.title,
+            description:   p.description ?? null,
+            sku:           p.sku ?? null,
+            price:         p.price ?? null,
+            stockQuantity: p.stock_quantity ?? 0,
+            categoryId:    p.category_id ?? null,
+            tags:          p.tags?.map(t => t.toLowerCase()) ?? [],
+            images:        p.images ?? [],
+            active:        p.active ?? true,
+            syncedAt:      now,
+          },
+          create: {
+            storeSlug,
+            sellerId:      p.id,
+            title:         p.title,
+            description:   p.description ?? null,
+            sku:           p.sku ?? null,
+            price:         p.price ?? null,
+            stockQuantity: p.stock_quantity ?? 0,
+            categoryId:    p.category_id ?? null,
+            tags:          p.tags?.map(t => t.toLowerCase()) ?? [],
+            images:        p.images ?? [],
+            active:        p.active ?? true,
+            syncedAt:      now,
+          },
+        });
+      }
+
+      // 3. Delete items that were NOT updated in this sync batch
+      await tx.cachedCategory.deleteMany({
+        where: { storeSlug, syncedAt: { lt: now } },
+      });
+      await tx.cachedProduct.deleteMany({
+        where: { storeSlug, syncedAt: { lt: now } },
+      });
+    });
 
     return { categories: categories.length, products: products.length };
   }
@@ -150,8 +175,8 @@ export class CatalogService {
   }
 
   private _buildStoreProductsWhere(storeSlug: string, categoryId?: number, search?: string) {
-    let where: any = { storeSlug, active: true };
-    if (categoryId != null) where.categoryId = categoryId;
+    const and: any[] = [{ storeSlug, active: true }];
+    if (categoryId != null) and.push({ categoryId });
     
     if (search) {
       const parsed = parseSearchQuery(search);
@@ -160,18 +185,10 @@ export class CatalogService {
         minPrice: parsed.minPrice,
         inStockOnly: parsed.inStockOnly,
       });
-      const combinedAnd = [...(where.AND || []), ...(searchWhere.AND || [])];
-      where = { 
-        ...where, 
-        ...searchWhere, 
-      };
-      if (combinedAnd.length > 0) {
-        where.AND = combinedAnd;
-      } else {
-        delete where.AND;
-      }
+      if (searchWhere.AND) and.push(...searchWhere.AND);
     }
-    return where;
+    
+    return { AND: and };
   }
 
   async getProducts(

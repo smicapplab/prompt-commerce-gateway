@@ -18,19 +18,34 @@ export class MockGateway implements PaymentGateway {
     // Generate a deterministic reference ID for traceability
     const referenceId = `mock_${order.storeSlug}_${order.orderId}_${Date.now()}`;
 
-    // Mock confirms instantly — no redirect needed
+    // Mock returns a redirect URL to our own mock checkout page
+    const baseUrl = order.successUrl.split('/payment/')[0];
+    const paymentUrl = `${baseUrl}/mock-pay?ref=${referenceId}`;
+
     return {
       referenceId,
-      status: 'paid',
+      status: 'pending',
+      paymentUrl,
     };
   }
 
-  // Mock never receives real webhooks; this is a no-op stub
+  // Mock exercises the same webhook verification path as real providers
   async handleWebhook(
-    _body: unknown,
-    _signature: string,
-    _secret: string,
+    body: any,
+    signature: string,
+    secret: string,
   ): Promise<WebhookEvent | null> {
+    // Basic signature verification (mock-secret)
+    if (signature !== secret) return null;
+
+    // Expected mock payload: { type: 'mock.payment.paid', referenceId: '...' }
+    if (body?.type === 'mock.payment.paid' && body?.referenceId) {
+      return {
+        referenceId: body.referenceId,
+        status:      'paid',
+      };
+    }
+
     return null;
   }
 }

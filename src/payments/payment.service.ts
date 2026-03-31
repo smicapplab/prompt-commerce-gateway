@@ -31,6 +31,8 @@ export interface PaymentRecord {
   referenceId: string;
   status:      string;
   paymentUrl:  string | null;
+  successUrl:  string | null;
+  cancelUrl:   string | null;
   provider:    string;
 }
 
@@ -108,6 +110,8 @@ export class PaymentService {
         provider,
         status:      result.status,
         paymentUrl:  result.paymentUrl ?? null,
+        successUrl:  orderCtx.successUrl,
+        cancelUrl:   orderCtx.cancelUrl,
       },
     });
 
@@ -116,6 +120,8 @@ export class PaymentService {
       referenceId: payment.referenceId,
       status:      payment.status,
       paymentUrl:  payment.paymentUrl,
+      successUrl:  payment.successUrl,
+      cancelUrl:   payment.cancelUrl,
       provider:    payment.provider,
     };
   }
@@ -133,7 +139,8 @@ export class PaymentService {
     if (!retailer) return null;
 
     const adapter = this.resolveAdapter(retailer.paymentProvider);
-    const secret  = retailer.paymentWebhookSecret ?? '';
+    // Use the stored secret, or fall back to 'mock-secret' if it's the mock provider
+    const secret = retailer.paymentWebhookSecret || (adapter.name === 'mock' ? 'mock-secret' : '');
 
     const event = await adapter.handleWebhook(body, signature, secret);
     if (!event) return null;

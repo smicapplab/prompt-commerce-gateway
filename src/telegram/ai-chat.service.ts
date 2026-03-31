@@ -9,6 +9,9 @@ import {
 } from '@google/generative-ai';
 import OpenAI from 'openai';
 import { callRetailerTool, type RetailerTarget } from '../mcp/retailer-client';
+import { ConversationService } from '../chat/conversation.service';
+import { ChatService } from '../chat/chat.service';
+import { isSsrfSafe } from '../utils/ssrf';
 
 // ─── Store AI config (read from Retailer row) ────────────────────────────────
 export interface StoreAiConfig {
@@ -79,6 +82,13 @@ const TOOL_SPECS = [
       num:   { type: 'integer', description: 'Number of results to return (default 5, max 10)' },
     },
   },
+  {
+    name: 'request_human_agent',
+    description: 'Call this when you cannot fulfill a request or the user explicitly asks for a real person. This will notify a human agent to take over the chat.',
+    properties: {
+      reason: { type: 'string', description: 'Brief explanation of why the human is needed' },
+    },
+  },
 ];
 
 // Anthropic format
@@ -111,55 +121,78 @@ const GEMINI_TOOLS: FunctionDeclaration[] = TOOL_SPECS.map(t => ({
   },
 }));
 
-// ─── Conversation history ────────────────────────────────────────────────────
-const histories = new Map<string, Anthropic.MessageParam[]>();
+// ─── Service ─────────────────────────────────────────────────────────────────
 const MAX_HISTORY = 20;
 
-// ─── Service ─────────────────────────────────────────────────────────────────
 @Injectable()
 export class AiChatService {
   private readonly logger = new Logger(AiChatService.name);
 
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(
+    private readonly catalog: CatalogService,
+    private readonly conversationService: ConversationService,
+    private readonly chatService: ChatService,
+  ) {}
 
-  clearHistory(userId: number, storeSlug: string): void {
-    histories.delete(`${userId}:${storeSlug}`);
+  clearHistory(userId: string, storeSlug: string): void {
+    // History is now in DB
   }
 
   async chat(
-    userId: number,
+    userId: string,
     storeSlug: string,
     storeName: string,
     retailer: RetailerTarget,
     userMessage: string,
     config: StoreAiConfig,
+    conversationId?: number,
   ): Promise<string> {
     this.logger.log(`[AiChat] Message from user ${userId} for store ${storeSlug}: "${userMessage}"`);
 
+    // ── Load history from DB if conversation exists ──────────────────────────
+    let history: Anthropic.MessageParam[] = [];
+    if (conversationId) {
+      const msgs = await this.chatService.getRecentMessages(conversationId, MAX_HISTORY);
+      // Convert to provider format, keeping only buyer and ai messages
+      history = msgs
+        .filter(m => m.senderType === 'buyer' || m.senderType === 'ai')
+        .reverse() // getRecentMessages returns desc, we need asc
+        .map(m => ({
+          role: m.senderType === 'buyer' ? 'user' : 'assistant',
+          content: m.body,
+        } as Anthropic.MessageParam));
+    }
+
+    let reply: string;
     if (config.provider === 'gemini') {
-      return this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config);
+      reply = await this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
+    } else if (config.provider === 'openai') {
+      reply = await this.chatOpenAi(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
+    } else {
+      reply = await this.chatClaude(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
     }
-    if (config.provider === 'openai') {
-      return this.chatOpenAi(userId, storeSlug, storeName, retailer, userMessage, config);
+
+    // ── Unified Logging: Log AI reply ──
+    if (conversationId) {
+      await this.conversationService.logMessage(conversationId, storeSlug, 'ai', reply, 'AI Bot');
     }
-    return this.chatClaude(userId, storeSlug, storeName, retailer, userMessage, config);
+
+    return reply;
   }
 
   // ─── Claude (Anthropic) ──────────────────────────────────────────────────
   private async chatClaude(
-    userId: number,
+    userId: string,
     storeSlug: string,
     storeName: string,
     retailer: RetailerTarget,
     userMessage: string,
     config: StoreAiConfig,
+    conversationId?: number,
+    history: Anthropic.MessageParam[] = [],
   ): Promise<string> {
     const client = new Anthropic({ apiKey: config.apiKey });
     const model  = config.model ?? DEFAULT_MODELS.claude;
-    const histKey = `${userId}:${storeSlug}`;
-
-    const history = histories.get(histKey) ?? [];
-    history.push({ role: 'user', content: userMessage });
 
     const system = config.systemPrompt?.trim() ||
       `You are a friendly shopping assistant for "${storeName}". ` +
@@ -167,10 +200,15 @@ export class AiChatService {
       `Use your tools to look up real store data. Format responses concisely for Telegram. ` +
       `Use ₱ for prices.`;
 
-    let messages: Anthropic.MessageParam[] = [...history];
+    const messages: Anthropic.MessageParam[] = [...history, { role: 'user', content: userMessage }];
     let finalText = '';
+    const deadline = Date.now() + 30_000;
 
     for (let round = 0; round < 5; round++) {
+      if (Date.now() > deadline) {
+        this.logger.warn(`[AiChat] Deadline exceeded for user ${userId} (Claude)`);
+        break;
+      }
       const response = await client.messages.create({
         model,
         max_tokens: 1024,
@@ -195,25 +233,25 @@ export class AiChatService {
         results.push({
           type: 'tool_result',
           tool_use_id: tool.id,
-          content: await this.callTool(retailer, tool.name, tool.input as Record<string, unknown>, config),
+          content: await this.callTool(retailer, tool.name, tool.input as Record<string, unknown>, config, conversationId),
         });
       }
       messages.push({ role: 'user', content: results });
     }
 
-    history.push({ role: 'assistant', content: finalText || 'Sorry, I could not process that.' });
-    histories.set(histKey, history.slice(-MAX_HISTORY));
     return finalText || 'Sorry, I could not process that request.';
   }
 
   // ─── Gemini (Google) ─────────────────────────────────────────────────────
   private async chatGemini(
-    userId: number,
+    userId: string,
     storeSlug: string,
     storeName: string,
     retailer: RetailerTarget,
     userMessage: string,
     config: StoreAiConfig,
+    conversationId?: number,
+    history: Anthropic.MessageParam[] = [],
   ): Promise<string> {
     const genAI = new GoogleGenerativeAI(config.apiKey);
     const model = genAI.getGenerativeModel({
@@ -226,10 +264,6 @@ export class AiChatService {
       tools: [{ functionDeclarations: GEMINI_TOOLS }],
     });
 
-    // Build Gemini-format history (excludes the current message)
-    const histKey = `${userId}:${storeSlug}`;
-    const history = histories.get(histKey) ?? [];
-
     const chat = model.startChat({
       history: history.map(h => ({
         role: h.role === 'assistant' ? 'model' : 'user',
@@ -241,9 +275,14 @@ export class AiChatService {
 
     let response = await chat.sendMessage(userMessage);
     let finalText = '';
+    const deadline = Date.now() + 30_000;
 
     // Agentic tool-use loop
     for (let round = 0; round < 5; round++) {
+      if (Date.now() > deadline) {
+        this.logger.warn(`[AiChat] Deadline exceeded for user ${userId} (Gemini)`);
+        break;
+      }
       const candidate = response.response.candidates?.[0];
       const parts = candidate?.content?.parts ?? [];
 
@@ -258,7 +297,7 @@ export class AiChatService {
         fnCalls.map(async p => ({
           functionResponse: {
             name: p.functionCall!.name,
-            response: { result: await this.callTool(retailer, p.functionCall!.name, p.functionCall!.args as Record<string, unknown>, config) },
+            response: { result: await this.callTool(retailer, p.functionCall!.name, p.functionCall!.args as Record<string, unknown>, config, conversationId) },
           },
         }))
       );
@@ -271,27 +310,23 @@ export class AiChatService {
       finalText = parts.map(p => p.text ?? '').join('').trim();
     }
 
-    // Update history
-    history.push(
-      { role: 'user',      content: userMessage },
-      { role: 'assistant', content: finalText || 'Sorry, I could not process that.' },
-    );
-    histories.set(histKey, history.slice(-MAX_HISTORY));
     return finalText || 'Sorry, I could not process that request.';
   }
 
   // ─── OpenAI ──────────────────────────────────────────────────────────────
   private async chatOpenAi(
-    userId: number,
+    userId: string,
     storeSlug: string,
     storeName: string,
     retailer: RetailerTarget,
     userMessage: string,
     config: StoreAiConfig,
+    conversationId?: number,
+    history: Anthropic.MessageParam[] = [],
   ): Promise<string> {
     const client = new OpenAI({ apiKey: config.apiKey });
     const model  = config.model ?? DEFAULT_MODELS.openai;
-    const histKey = `${userId}:${storeSlug}`;
+    const deadline = Date.now() + 30_000;
 
     const system = config.systemPrompt?.trim() ||
       `You are a friendly shopping assistant for "${storeName}". ` +
@@ -314,8 +349,6 @@ export class AiChatService {
       },
     }));
 
-    // Build message history in OpenAI format
-    const history = histories.get(histKey) ?? [];
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: 'system', content: system },
       ...history.map(h => ({
@@ -330,6 +363,10 @@ export class AiChatService {
     let finalText = '';
 
     for (let round = 0; round < 5; round++) {
+      if (Date.now() > deadline) {
+        this.logger.warn(`[AiChat] Deadline exceeded for user ${userId} (OpenAI)`);
+        break;
+      }
       const response = await client.chat.completions.create({ model, tools, messages });
       const choice = response.choices[0];
 
@@ -343,7 +380,7 @@ export class AiChatService {
       for (const tc of choice.message.tool_calls) {
         const fn = (tc as any).function as { name: string; arguments: string };
         const args = JSON.parse(fn.arguments || '{}');
-        const result = await this.callTool(retailer, fn.name, args, config);
+        const result = await this.callTool(retailer, fn.name, args, config, conversationId);
         messages.push({
           role: 'tool',
           tool_call_id: tc.id,
@@ -352,9 +389,6 @@ export class AiChatService {
       }
     }
 
-    history.push({ role: 'user', content: userMessage });
-    history.push({ role: 'assistant', content: finalText || 'Sorry, I could not process that.' });
-    histories.set(histKey, history.slice(-MAX_HISTORY));
     return finalText || 'Sorry, I could not process that request.';
   }
 
@@ -364,6 +398,7 @@ export class AiChatService {
     toolName: string,
     args: Record<string, unknown>,
     config?: StoreAiConfig,
+    conversationId?: number,
   ): Promise<string> {
     const startTime = Date.now();
     this.logger.log(`[AiChat] Tool Call: ${toolName} with args: ${JSON.stringify(args)}`);
@@ -383,6 +418,16 @@ export class AiChatService {
       return result;
     }
 
+    // request_human_agent: trigger handover
+    if (toolName === 'request_human_agent') {
+      if (conversationId) {
+        await this.conversationService.setMode(conversationId, 'human');
+        await this.conversationService.logMessage(conversationId, retailer.slug, 'system', `AI requested human assistance: ${args.reason || 'No reason provided'}`);
+        return 'Request sent. A human agent will take over shortly. Please tell the user that someone will be with them soon.';
+      }
+      return 'Error: conversation not found.';
+    }
+
     // fallback for search_products using the local PostgreSQL cache
     if (toolName === 'search_products') {
       try {
@@ -393,7 +438,7 @@ export class AiChatService {
         if (minPrice != null) searchStr += ` above ${minPrice}`;
         if (maxPrice != null) searchStr += ` under ${maxPrice}`;
 
-        const limit = (args.limit as number) || 10;
+        const limit = Math.min((args.limit as number) || 10, 50);
         const products = await this.catalog.getProducts(retailer.slug, {
           search: searchStr.trim() || undefined,
           limit,
@@ -466,8 +511,8 @@ export class AiChatService {
 
   // ─── fetch_url: fetch a public URL and return text + image list ──────────
   private async fetchUrl(url: string): Promise<string> {
-    if (!url?.startsWith('http')) {
-      return 'Error: URL must start with http:// or https://';
+    if (!(await isSsrfSafe(url))) {
+      return 'Error: URL is unsafe or invalid.';
     }
     try {
       const res = await fetch(url, {

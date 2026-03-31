@@ -42,12 +42,27 @@ export class CatalogController {
 
     let result: { categories: number; products: number };
 
+    // ── Validation: Limit batch size ────────────────────────────────────────
+    const MAX_SYNC_BATCH = 1000;
+
     if ('upsert' in body) {
       // ── Delta format ──────────────────────────────────────────────────────
-      result = await this.catalog.delta(slug, body as unknown as DeltaPayload);
+      const payload = body as unknown as DeltaPayload;
+      if (
+        (payload.upsert?.products?.length ?? 0) > MAX_SYNC_BATCH ||
+        (payload.upsert?.categories?.length ?? 0) > MAX_SYNC_BATCH ||
+        (payload.delete?.productIds?.length ?? 0) > MAX_SYNC_BATCH ||
+        (payload.delete?.categoryIds?.length ?? 0) > MAX_SYNC_BATCH
+      ) {
+        throw new UnauthorizedException(`Sync payload exceeds limit of ${MAX_SYNC_BATCH} items per request.`);
+      }
+      result = await this.catalog.delta(slug, payload);
     } else {
       // ── Legacy full-snapshot format ───────────────────────────────────────
       const b = body as { categories?: SyncCategoryDto[]; products?: SyncProductDto[] };
+      if ((b.categories?.length ?? 0) > MAX_SYNC_BATCH || (b.products?.length ?? 0) > MAX_SYNC_BATCH) {
+        throw new UnauthorizedException(`Sync payload exceeds limit of ${MAX_SYNC_BATCH} items per request.`);
+      }
       result = await this.catalog.fullSnapshot(slug, b.categories ?? [], b.products ?? []);
     }
 
@@ -124,11 +139,16 @@ export class CatalogController {
   ) {
     const retailer = await this.validateKey(slug, platformKey);
 
+    let webhookSecret = body.paymentWebhookSecret ?? null;
+    if (body.paymentProvider === 'mock' && !webhookSecret) {
+      webhookSecret = 'mock-secret';
+    }
+
     await this.registry.update(retailer.id, {
       paymentProvider:      body.paymentProvider      ?? null,
       paymentApiKey:        body.paymentApiKey        ?? null,
       paymentPublicKey:     body.paymentPublicKey     ?? null,
-      paymentWebhookSecret: body.paymentWebhookSecret ?? null,
+      paymentWebhookSecret: webhookSecret,
     });
 
     return { message: `Payment config updated for "${slug}".` };
