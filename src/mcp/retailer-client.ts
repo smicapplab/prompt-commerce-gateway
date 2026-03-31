@@ -34,7 +34,7 @@ export async function callRetailerTool(
 
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise((_, reject) => {
-    timeoutHandle = setTimeout(() => reject(new Error(`MCP timeout after 10s calling "${toolName}"`)), 10000);
+    timeoutHandle = setTimeout(() => reject(new Error(`MCP timeout after 30s calling "${toolName}"`)), 30000);
   });
 
   try {
