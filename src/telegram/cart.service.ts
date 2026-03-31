@@ -15,9 +15,9 @@ export class CartService {
 
   // ── Read ──────────────────────────────────────────────────────────────────────
 
-  async get(userId: number, storeSlug: string): Promise<CartItem[]> {
+  async get(userId: string, storeSlug: string): Promise<CartItem[]> {
     const rows = await this.prisma.cart.findMany({
-      where: { userId: String(userId), storeSlug },
+      where: { userId, storeSlug },
       orderBy: { updatedAt: 'asc' },
     });
     return rows.map(r => ({
@@ -28,14 +28,14 @@ export class CartService {
     }));
   }
 
-  async total(userId: number, storeSlug: string): Promise<number> {
+  async total(userId: string, storeSlug: string): Promise<number> {
     const items = await this.get(userId, storeSlug);
     return items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   }
 
-  async isEmpty(userId: number, storeSlug: string): Promise<boolean> {
+  async isEmpty(userId: string, storeSlug: string): Promise<boolean> {
     const count = await this.prisma.cart.count({
-      where: { userId: String(userId), storeSlug },
+      where: { userId, storeSlug },
     });
     return count === 0;
   }
@@ -43,43 +43,81 @@ export class CartService {
   // ── Write ─────────────────────────────────────────────────────────────────────
 
   async add(
-    userId: number,
+    userId: string,
     storeSlug: string,
     item: Omit<CartItem, 'quantity'>,
     qty = 1,
   ): Promise<CartItem[]> {
-    const uid = String(userId);
-
     await this.prisma.cart.upsert({
-      where:  { userId_storeSlug_productId: { userId: uid, storeSlug, productId: item.productId } },
-      create: { userId: uid, storeSlug, productId: item.productId, title: item.title, price: item.price, quantity: qty },
+      where:  { userId_storeSlug_productId: { userId, storeSlug, productId: item.productId } },
+      create: { userId, storeSlug, productId: item.productId, title: item.title, price: item.price, quantity: qty },
       update: { quantity: { increment: qty }, title: item.title, price: item.price },
     });
 
     return this.get(userId, storeSlug);
   }
 
-  async remove(userId: number, storeSlug: string, productId: number): Promise<CartItem[]> {
+  async remove(userId: string, storeSlug: string, productId: number): Promise<CartItem[]> {
     await this.prisma.cart.deleteMany({
-      where: { userId: String(userId), storeSlug, productId },
+      where: { userId, storeSlug, productId },
     });
     return this.get(userId, storeSlug);
   }
 
-  async updateQty(userId: number, storeSlug: string, productId: number, quantity: number): Promise<void> {
+  async updateQty(userId: string, storeSlug: string, productId: number, quantity: number): Promise<void> {
     if (quantity <= 0) {
       await this.remove(userId, storeSlug, productId);
       return;
     }
     await this.prisma.cart.updateMany({
-      where:  { userId: String(userId), storeSlug, productId },
+      where:  { userId, storeSlug, productId },
       data:   { quantity },
     });
   }
 
-  async clear(userId: number, storeSlug: string): Promise<void> {
+  async clear(userId: string, storeSlug: string): Promise<void> {
     await this.prisma.cart.deleteMany({
-      where: { userId: String(userId), storeSlug },
+      where: { userId, storeSlug },
     });
+  }
+
+  /**
+   * Refreshes cart items with latest prices from the catalog cache.
+   * Returns a summary of changes if any prices or stock statuses changed.
+   */
+  async validateCartPrices(userId: string, storeSlug: string): Promise<{ changed: boolean; oldTotal: number; newTotal: number }> {
+    const items = await this.prisma.cart.findMany({
+      where: { userId, storeSlug },
+    });
+
+    let changed = false;
+    let oldTotal = 0;
+    let newTotal = 0;
+
+    for (const item of items) {
+      oldTotal += item.price * item.quantity;
+      const product = await this.prisma.cachedProduct.findUnique({
+        where: { storeSlug_sellerId: { storeSlug, sellerId: item.productId } },
+      });
+
+      if (!product || !product.active || product.price !== item.price) {
+        changed = true;
+        if (!product || !product.active) {
+          // Product no longer available — remove from cart
+          await this.remove(userId, storeSlug, item.productId);
+        } else {
+          // Update price in cart
+          await this.prisma.cart.update({
+            where: { id: item.id },
+            data: { price: product.price ?? 0 },
+          });
+          newTotal += (product.price ?? 0) * item.quantity;
+        }
+      } else {
+        newTotal += item.price * item.quantity;
+      }
+    }
+
+    return { changed, oldTotal, newTotal };
   }
 }

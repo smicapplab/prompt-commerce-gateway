@@ -11,6 +11,7 @@ import { CatalogModule } from './catalog/catalog.module';
 import { PaymentModule } from './payments/payment.module';
 import { WebhookModule } from './payments/webhook.module';
 import { StorefrontModule } from './storefront/storefront.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { StorefrontModule } from './storefront/storefront.module';
     PaymentModule,
     WebhookModule,
     StorefrontModule,
+    ChatModule,
   ],
 })
 export class AppModule {}

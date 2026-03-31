@@ -44,6 +44,7 @@ model Retailer {
 
   platformKey PlatformKey?
   auditLogs   AuditLog[]
+  conversations Conversation[]
 
   @@map("retailers")
 }

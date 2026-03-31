@@ -33,7 +33,7 @@ pids=()
 cleanup() {
   echo ""
   echo "Stopping gateway services…"
-  for pid in "${pids[@]}"; do
+  for pid in "${pids[@]:-}"; do
     kill "$pid" 2>/dev/null || true
   done
   wait 2>/dev/null || true
@@ -72,12 +72,22 @@ if ! grep -q "^DIRECT_DATABASE_URL=" "$DIR/.env"; then
   export DIRECT_DATABASE_URL="${DATABASE_URL}"
 fi
 
-# ── Pre-flight: Clear Port 3002 ───────────────────────────────────────────────
-echo -e "${PREFIX_GW}Checking port 3002…"
-PIDS=$(lsof -ti :3002 2>/dev/null || true)
+# ── Pre-flight: Clear Ports ───────────────────────────────────────────────────
+TARGET_PORT=$(grep -E "^(PORT|GATEWAY_PORT)=" "$DIR/.env" | tail -n1 | cut -d'=' -f2 | grep -oE "[0-9]+" || echo 3002)
+echo -e "${PREFIX_GW}Checking port ${TARGET_PORT}…"
+PIDS=$(lsof -ti :${TARGET_PORT} 2>/dev/null || true)
 if [ -n "$PIDS" ]; then
-  echo -e "${Y}[gateway] Stopping existing process on port 3002 (PID $PIDS)…${N}"
+  echo -e "${Y}[gateway] Stopping existing process on port ${TARGET_PORT} (PID ${PIDS})…${N}"
   echo "$PIDS" | xargs kill -9 2>/dev/null || true
+  sleep 1
+fi
+
+# Also clear standard frontend port if needed
+UI_PORT=5173
+PIDS_UI=$(lsof -ti :${UI_PORT} 2>/dev/null || true)
+if [ -n "$PIDS_UI" ]; then
+  echo -e "${PREFIX_UI}Stopping existing process on port ${UI_PORT} (PID ${PIDS_UI})…${N}"
+  echo "$PIDS_UI" | xargs kill -9 2>/dev/null || true
   sleep 1
 fi
 
