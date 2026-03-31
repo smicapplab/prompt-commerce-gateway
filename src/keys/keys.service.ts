@@ -18,16 +18,7 @@ export class KeysService {
     const key = `gk_${crypto.randomBytes(24).toString('hex')}`;
 
     await this.prisma.$transaction([
-      // Revoke existing key if present
-      ...(retailer.platformKey
-        ? [
-            this.prisma.platformKey.update({
-              where: { retailerId },
-              data: { revokedAt: new Date() },
-            }),
-          ]
-        : []),
-      // Create new key
+      // Create new key (will overwrite any existing due to 1:1 upsert)
       this.prisma.platformKey.upsert({
         where: { retailerId },
         create: { retailerId, key },

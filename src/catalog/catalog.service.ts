@@ -40,13 +40,13 @@ export class CatalogService {
 
     await this.prisma.$transaction(async (tx) => {
       // ── Upsert categories ───────────────────────────────────────────────────
-      for (const c of upsert.categories) {
-        await tx.cachedCategory.upsert({
+      await Promise.all(upsert.categories.map((c) =>
+        tx.cachedCategory.upsert({
           where:  { storeSlug_sellerId: { storeSlug, sellerId: c.id } },
           update: { name: c.name, parentId: c.parent_id ?? null, syncedAt: new Date() },
           create: { storeSlug, sellerId: c.id, name: c.name, parentId: c.parent_id ?? null },
-        });
-      }
+        })
+      ));
 
       // ── Delete removed categories ───────────────────────────────────────────
       if (del.categoryIds.length > 0) {
@@ -56,8 +56,8 @@ export class CatalogService {
       }
 
       // ── Upsert products ─────────────────────────────────────────────────────
-      for (const p of upsert.products) {
-        await tx.cachedProduct.upsert({
+      await Promise.all(upsert.products.map((p) =>
+        tx.cachedProduct.upsert({
           where:  { storeSlug_sellerId: { storeSlug, sellerId: p.id } },
           update: {
             title:         p.title,
@@ -84,8 +84,8 @@ export class CatalogService {
             images:        p.images ?? [],
             active:        p.active ?? true,
           },
-        });
-      }
+        })
+      ));
 
       // ── Delete removed products ─────────────────────────────────────────────
       if (del.productIds.length > 0) {
@@ -113,17 +113,17 @@ export class CatalogService {
 
     await this.prisma.$transaction(async (tx) => {
       // 1. Upsert all categories with new timestamp
-      for (const c of categories) {
-        await tx.cachedCategory.upsert({
+      await Promise.all(categories.map((c) =>
+        tx.cachedCategory.upsert({
           where: { storeSlug_sellerId: { storeSlug, sellerId: c.id } },
           update: { name: c.name, parentId: c.parent_id ?? null, syncedAt: now },
           create: { storeSlug, sellerId: c.id, name: c.name, parentId: c.parent_id ?? null, syncedAt: now },
-        });
-      }
+        })
+      ));
 
       // 2. Upsert all products with new timestamp
-      for (const p of products) {
-        await tx.cachedProduct.upsert({
+      await Promise.all(products.map((p) =>
+        tx.cachedProduct.upsert({
           where: { storeSlug_sellerId: { storeSlug, sellerId: p.id } },
           update: {
             title:         p.title,
@@ -151,8 +151,8 @@ export class CatalogService {
             active:        p.active ?? true,
             syncedAt:      now,
           },
-        });
-      }
+        })
+      ));
 
       // 3. Delete items that were NOT updated in this sync batch
       await tx.cachedCategory.deleteMany({
