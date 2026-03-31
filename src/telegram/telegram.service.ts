@@ -10,7 +10,7 @@ import { callRetailerTool } from '../mcp/retailer-client';
 import { AiChatService, type StoreAiConfig } from './ai-chat.service';
 import { CartService } from './cart.service';
 import { ConversationService } from '../chat/conversation.service';
-import type { PaymentService } from '../payments/payment.service';
+import { PaymentService } from '../payments/payment.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
          productListKeyboard, productDetailKeyboard, productDetailSearchKeyboard,
          cartKeyboard, emptyCartKeyboard, aiModeKeyboard, backKeyboard,
@@ -207,6 +207,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.command('stores', async (ctx) => {
       await this.syncUser(ctx);
       const stores = await this.registry.findActiveRetailers();
+      this.logger.log(`Found ${stores.length} active retailers: ${stores.map(s => s.slug).join(', ')}`);
       if (!stores.length) {
         await ctx.reply('No stores available right now.');
         return;
