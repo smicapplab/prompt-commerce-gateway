@@ -918,6 +918,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const orderItems = items.map(i => ({ product_id: i.productId, quantity: i.quantity }));
 
     try {
+      try {
+        await ctx.editMessageText('⏳ Processing your order... Please wait.', { parse_mode: 'HTML' });
+      } catch (e: any) {
+        if (!e.message?.includes('message is not modified')) {
+          this.logger.warn(`Could not set processing message: ${e}`);
+        }
+      }
+
       // ── Step 1: Create the order in the seller's store ──────────────────────
       const result = await callRetailerTool(retailer, 'create_order', {
         items: orderItems,
@@ -1019,10 +1027,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     } catch (err) {
       this.logger.error(`Order creation failed: ${err}`);
-      await ctx.editMessageText(
-        '❌ Sorry, there was an error placing your order. Please try again.',
-        { reply_markup: backKeyboard(slug) },
-      );
+      try {
+        await ctx.editMessageText(
+          '❌ Sorry, there was an error placing your order. Please try again.',
+          { reply_markup: backKeyboard(slug) },
+        );
+      } catch (e: any) {
+        if (!e.message?.includes('message is not modified')) {
+          this.logger.error(`Failed to show order error: ${e}`);
+        }
+      }
     }
   }
 
