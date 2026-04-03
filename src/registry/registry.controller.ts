@@ -7,6 +7,7 @@ import {
   Param,
   Query,
   Body,
+  Headers,
   ParseIntPipe,
   UseGuards,
   HttpCode,
@@ -15,6 +16,7 @@ import {
   UploadedFile,
   NotFoundException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -70,7 +72,33 @@ export class RegistrationController {
 export class StoresController {
   constructor(
     private readonly keysService: KeysService,
+    private readonly registry: RegistryService,
   ) {}
+
+  /**
+   * PATCH /api/stores/:slug/store-config
+   * Pushed from seller admin (fire-and-forget).
+   * Validates platform key via x-gateway-key header.
+   */
+  @Patch(':slug/store-config')
+  async updateStoreConfig(
+    @Param('slug') slug: string,
+    @Body() body: { allowsPickup?: boolean },
+    @Headers('x-gateway-key') platformKey: string,
+  ) {
+    if (!platformKey) throw new UnauthorizedException('x-gateway-key header required.');
+    
+    const retailer = await this.keysService.validateKey(platformKey);
+    if (!retailer || retailer.slug !== slug) {
+      throw new UnauthorizedException('Invalid platform key for this store.');
+    }
+
+    await this.registry.updateBySlug(slug, {
+      allowsPickup: body.allowsPickup,
+    });
+
+    return { success: true };
+  }
 
   /**
    * GET /api/stores/lookup?key=<platform_key>

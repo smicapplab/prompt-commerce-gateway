@@ -8,6 +8,7 @@ model Retailer {
   businessPermitUrl String?  @map("business_permit_url")
   verified          Boolean  @default(false)
   active            Boolean  @default(true)
+  allowsPickup      Boolean  @default(false) @map("allows_pickup")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
@@ -41,6 +42,10 @@ model Retailer {
   paymentApiKey        String? @map("payment_api_key")
   paymentPublicKey     String? @map("payment_public_key")
   paymentWebhookSecret String? @map("payment_webhook_secret")
+  paymentInstructions  String? @map("payment_instructions")
+  paymentLinkTemplate  String? @map("payment_link_template")
+  assistedLabel        String? @map("assisted_label")
+  allowCod             Boolean @default(true) @map("allow_cod")
 
   platformKey PlatformKey?
   auditLogs   AuditLog[]

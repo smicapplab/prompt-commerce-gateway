@@ -7,14 +7,14 @@ import { RegistryService } from '../registry/registry.service';
 import { SettingsService } from '../settings/settings.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { callRetailerTool } from '../mcp/retailer-client';
-import { AiChatService, type StoreAiConfig } from './ai-chat.service';
+import { AiChatService, type StoreAiConfig, type ChatResult } from './ai-chat.service';
 import { CartService } from './cart.service';
 import { ConversationService } from '../chat/conversation.service';
 import { PaymentService } from '../payments/payment.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
          productListKeyboard, productDetailKeyboard, productDetailSearchKeyboard,
-         cartKeyboard, emptyCartKeyboard, aiModeKeyboard, backKeyboard,
-         quantityKeyboard } from './keyboards';
+         cartKeyboard, emptyCartKeyboard, aiModeKeyboard, aiProductKeyboard,
+         backKeyboard, quantityKeyboard } from './keyboards';
 import { esc, price, productDetail, cartSummary, orderConfirmation,
          welcomeMessage, storeMenuMessage, aiGreeting } from './formatters';
 
@@ -22,11 +22,13 @@ const PAGE_SIZE = 8;
 
 // ─── Checkout session state ───────────────────────────────────────────────────
 interface CheckoutState {
-  storeSlug: string;
-  step: 'name' | 'email' | 'address' | 'confirm';
-  name?: string;
-  email?: string;
-  address?: string;
+  storeSlug:     string;
+  step:          'name' | 'email' | 'address' | 'delivery' | 'payment' | 'confirm';
+  name?:         string;
+  email?:        string;
+  address?:      string;
+  deliveryType?: 'delivery' | 'pickup';
+  paymentMethod?: 'cod' | 'gateway';  // 'gateway' = store's configured provider
 }
 
 // ─── AI session state ─────────────────────────────────────────────────────────
@@ -334,6 +336,34 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
+        // delivery:<type>:<slug> — delivery type selected
+        if (data.startsWith('delivery:')) {
+          const [, type, slug] = data.split(':');
+          const state = this.checkoutSessions.get(userId);
+          if (!state || state.storeSlug !== slug) return;
+
+          state.deliveryType = type as 'delivery' | 'pickup';
+          state.step = 'payment';
+          this.checkoutSessions.set(userId, state);
+          
+          const retailer = await this.getRetailer(slug);
+          await this.showPaymentSelection(ctx, slug, retailer);
+          return;
+        }
+
+        // pmnt:<method>:<slug> — payment method selected
+        if (data.startsWith('pmnt:')) {
+          const [, method, slug] = data.split(':');
+          const state = this.checkoutSessions.get(userId);
+          if (!state || state.storeSlug !== slug) return;
+
+          state.paymentMethod = method as 'cod' | 'gateway';
+          state.step = 'confirm';
+          this.checkoutSessions.set(userId, state);
+          await this.showOrderSummary(ctx, userId, slug, state, true);
+          return;
+        }
+
         // c:<slug>:<catId> — products in category
         if (data.startsWith('c:')) {
           const parts = data.split(':');
@@ -568,9 +598,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (hasNext) keyboard.text('Next →', `srch:${offset + PAGE}`);
     if (hasPrev || hasNext) keyboard.row();
     for (const p of results) {
-      const icon = p.images?.length > 0 ? '📷 ' : '👁 ';
       const priceStr = p.price != null ? `₱${p.price.toLocaleString('en-PH', { minimumFractionDigits: 0 })}` : 'TBD';
-      keyboard.text(`${icon}[${priceStr}] ${p.title.slice(0, 25)}`, `p:${p.storeSlug}:${p.sellerId}`).row();
+      keyboard.text(`${p.title.slice(0, 35)} (${priceStr})`, `p:${p.storeSlug}:${p.sellerId}`).row();
     }
     // Show View Cart shortcut if user has a known active store
     const cartSlug = userId
@@ -665,14 +694,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const lines = pageProducts.map(p => {
-      const stockTag = p.stock_quantity === 0 ? ' ⚠️' : '';
-      return `• <b>${esc(p.title)}</b>${stockTag} — ${price(p.price)}`;
-    }).join('\n');
-
     const syncNote = synced ? '' : '\n\n<i>💡 Sync catalog for faster browsing.</i>';
     await ctx.editMessageText(
-      `<b>Products</b> (page ${page + 1})\n\n${lines}${syncNote}\n\n<i>Tap a product for details:</i>`,
+      `<b>Products</b> (page ${page + 1})${syncNote}\n\n<i>Tap a product for details:</i>`,
       {
         parse_mode: 'HTML',
         reply_markup: productListKeyboard(slug, pageProducts, catId, page, hasMore),
@@ -869,38 +893,65 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       state.address = trimmed;
-      state.step = 'confirm';
-      this.checkoutSessions.set(userId, state);
-
-      // ── Refresh prices before confirmation ────────────────────────────────
-      const { changed, oldTotal, newTotal } = await this.cartService.validateCartPrices(userId, storeSlug);
-      if (changed) {
-        await ctx.reply(
-          `⚠️ <b>Note:</b> Some items in your cart have changed in price or availability. ` +
-          `Your order total has been updated from ${price(oldTotal)} to <b>${price(newTotal)}</b>.`
-        );
-      }
-
-      const items = await this.cartService.get(userId, storeSlug);
-      if (items.length === 0) {
-        await ctx.reply('Your cart is now empty. Please add items before checking out.');
-        this.checkoutSessions.delete(userId);
+      
+      const retailer = await this.getRetailer(storeSlug);
+      if (retailer.allowsPickup) {
+        state.step = 'delivery';
+        this.checkoutSessions.set(userId, state);
+        
+        const deliveryKb = new InlineKeyboard()
+          .text('🏠 Home Delivery', `delivery:delivery:${storeSlug}`)
+          .text('🏪 Store Pickup',  `delivery:pickup:${storeSlug}`);
+          
+        await ctx.reply('🚚 How would you like to receive your order?', { reply_markup: deliveryKb });
         return;
       }
-      const total = await this.cartService.total(userId, storeSlug);
-      const summary = items.map(i => `• ${i.title} × ${i.quantity} — ${price(i.price * i.quantity)}`).join('\n');
 
-      const confirmKb = new InlineKeyboard()
-        .text('✅ Confirm Order', `confirm:${storeSlug}`)
-        .text('❌ Cancel',        `cancel:${storeSlug}`);
-
-      await ctx.reply(
-        `<b>Order Summary</b>\n\n${summary}\n\n<b>Total: ${price(total)}</b>\n\n` +
-        `👤 Name: ${esc(state.name)}\n📧 Email: ${esc(state.email)}\n🏠 Address: ${esc(state.address)}\n\n` +
-        `Confirm your order?`,
-        { parse_mode: 'HTML', reply_markup: confirmKb },
-      );
+      state.step = 'payment';
+      state.deliveryType = 'delivery';
+      this.checkoutSessions.set(userId, state);
+      await this.showPaymentSelection(ctx, storeSlug, retailer);
       return;
+    }
+  }
+
+  private async showOrderSummary(ctx: any, userId: string, storeSlug: string, state: CheckoutState, isEdit = false): Promise<void> {
+    // ── Refresh prices before confirmation ────────────────────────────────
+    const { changed, oldTotal, newTotal } = await this.cartService.validateCartPrices(userId, storeSlug);
+    if (changed) {
+      const msg = `⚠️ <b>Note:</b> Some items in your cart have changed in price or availability. ` +
+                  `Your order total has been updated from ${price(oldTotal)} to <b>${price(newTotal)}</b>.`;
+      if (isEdit) await ctx.reply(msg, { parse_mode: 'HTML' });
+      else await ctx.reply(msg, { parse_mode: 'HTML' });
+    }
+
+    const items = await this.cartService.get(userId, storeSlug);
+    if (items.length === 0) {
+      await ctx.reply('Your cart is now empty. Please add items before checking out.');
+      this.checkoutSessions.delete(userId);
+      return;
+    }
+    const total = await this.cartService.total(userId, storeSlug);
+    const summary = items.map(i => `• ${i.title} × ${i.quantity} — ${price(i.price * i.quantity)}`).join('\n');
+
+    const confirmKb = new InlineKeyboard()
+      .text('✅ Confirm Order', `confirm:${storeSlug}`)
+      .text('❌ Cancel',        `cancel:${storeSlug}`);
+
+    const deliveryIcon = state.deliveryType === 'pickup' ? '🏪' : '🏠';
+    const deliveryText = state.deliveryType === 'pickup' ? 'Store Pickup' : 'Home Delivery';
+    const paymentText = state.paymentMethod === 'cod' ? '💵 Cash on Delivery' : '💳 Online Payment';
+
+    const text = `<b>Order Summary</b>\n\n${summary}\n\n<b>Total: ${price(total)}</b>\n\n` +
+      `👤 Name: ${esc(state.name)}\n📧 Email: ${esc(state.email)}\n🏠 Address: ${esc(state.address)}\n` +
+      `${deliveryIcon} Delivery: ${deliveryText}\n` +
+      `💳 Payment: ${paymentText}\n\n` +
+      `Confirm your order?`;
+
+    if (isEdit) {
+      await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: confirmKb });
+    } else {
+      await ctx.reply(text, { parse_mode: 'HTML', reply_markup: confirmKb });
     }
   }
 
@@ -977,6 +1028,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         channel: 'telegram',
         notes,
         confirm: true,
+        delivery_type: state.deliveryType || 'delivery',
+        payment_provider: retailer.paymentProvider || (await this.settings.get('default_payment_provider')) || 'cod',
+        payment_instructions: retailer.paymentInstructions || (await this.settings.get('default_payment_instructions')) || '',
       }) as any;
 
       const content = result?.content || [];
@@ -1062,6 +1116,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             description: `Order #${orderId} — ${slug}`,
             buyerEmail:  state.email,
             baseUrl,
+            providerOverride: state.paymentMethod === 'cod' ? 'cod' : undefined,
           });
 
           if (payment.status === 'paid') {
@@ -1069,6 +1124,32 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             await ctx.editMessageText(
               orderConfirmation(orderId, items, total),
               { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+            );
+          } else if (payment.provider === 'cod') {
+            // Cash on Delivery
+            await ctx.editMessageText(
+              `✅ <b>Order #${orderId} placed!</b>\n\n` +
+              `Payment Method: <b>Cash on Delivery</b>\n\n` +
+              `Please prepare <b>${price(total)}</b> in cash upon delivery/pickup.`,
+              { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+            );
+          } else if (payment.provider === 'assisted') {
+            // Assisted Payment (Offline / Manual)
+            const label = retailer.assistedLabel || (await this.settings.get('default_payment_label')) || 'Assisted Payment';
+            const payKb = new InlineKeyboard();
+            if (payment.paymentUrl) {
+              payKb.url(`💳 ${label}`, payment.paymentUrl).row();
+            }
+            payKb.text('🏠 Back to store', `bk:${slug}`);
+
+            const instructions = retailer.paymentInstructions || (await this.settings.get('default_payment_instructions')) || '';
+
+            await ctx.editMessageText(
+              `✅ <b>Order #${orderId} placed!</b>\n\n` +
+              (instructions ? `<b>Payment Instructions:</b>\n${esc(instructions)}\n\n` : '') +
+              `<b>Total: ${price(total)}</b>\n\n` +
+              `<i>Once you've made the payment, the store will verify and update your order status.</i>`,
+              { parse_mode: 'HTML', reply_markup: payKb },
             );
           } else if (payment.paymentUrl) {
             // Real gateway — send payment link
@@ -1120,6 +1201,45 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           this.logger.error(`Failed to show order error: ${e}`);
         }
       }
+    }
+  }
+
+  // ─── Notify user of order status change (called by OrdersService sync) ───────
+  async notifyOrderStatusChange(params: {
+    chatId: string;
+    orderId: number;
+    storeName: string;
+    newStatus: string;
+    trackingNumber?: string;
+    courierName?: string;
+    trackingUrl?: string;
+    cancellationReason?: string;
+    paymentInstructions?: string;
+  }) {
+    if (!this.bot) return;
+    const { chatId, orderId, storeName, newStatus } = params;
+
+    const templates: Record<string, string> = {
+      pending_payment: `✅ Order confirmed — payment instructions:\n\n${params.paymentInstructions || 'Please coordinate payment with the store.'}`,
+      pending:         `✅ Order confirmed — payment received.`,
+      paid:            `💳 Payment confirmed — your order is being prepared.`,
+      picking:         `🗂 Your order is being picked.`,
+      packing:         `📦 Your order is being packed.`,
+      in_transit:      `🚚 Your order is on its way!\n\nCourier: ${params.courierName || 'N/A'}\nTracking: ${params.trackingNumber || 'N/A'}${params.trackingUrl ? `\n[Track here](${params.trackingUrl})` : ''}`,
+      ready_for_pickup: `🏪 Your order is ready for pickup at ${storeName}!`,
+      delivered:       `✅ Your order has been delivered!`,
+      picked_up:       `✅ Your order has been picked up!`,
+      cancelled:       `❌ Your order has been cancelled.${params.cancellationReason ? `\nReason: ${params.cancellationReason}` : ''}`,
+      refunded:        `💸 Your order has been refunded.`,
+    };
+
+    const text = templates[newStatus] || `Order #${orderId} status changed to ${newStatus.replace(/_/g, ' ')}.`;
+    const message = `*${esc(storeName)}*\nOrder #${orderId}\n\n${text}`;
+
+    try {
+      await this.bot.api.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+    } catch (err) {
+      this.logger.error(`notifyOrderStatusChange failed for user ${chatId}: ${err}`);
     }
   }
 
@@ -1190,13 +1310,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const retailer = await this.getRetailer(storeSlug);
-      const reply = await this.aiChat.chat(userId, storeSlug, store.name, retailer, text, aiConfig, conv.id);
+      const result: ChatResult = await this.aiChat.chat(userId, storeSlug, store.name, retailer, text, aiConfig, conv.id);
 
-      await ctx.reply(reply, {
-        parse_mode: 'HTML',
-        reply_markup: aiModeKeyboard(storeSlug),
-      });
-      
+      const keyboard = result.products?.length
+        ? aiProductKeyboard(storeSlug, result.products)
+        : aiModeKeyboard(storeSlug);
+
+      await ctx.reply(result.text, { parse_mode: 'HTML', reply_markup: keyboard });
+
       // AI reply logging is handled inside AiChatService.chat()
     } catch (err) {
       this.logger.error(`AI chat error: ${err}`);
@@ -1229,6 +1350,46 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       slug: r.slug,
       mcpServerUrl: r.mcpServerUrl,
       platformKey: r.platformKey.key,
+      allowsPickup: r.allowsPickup,
+      allowCod: r.allowCod,
+      paymentProvider: r.paymentProvider,
+      paymentInstructions: r.paymentInstructions,
+      assistedLabel: r.assistedLabel,
     };
+  }
+
+  private async showPaymentSelection(ctx: any, slug: string, retailer: any): Promise<void> {
+    const allowCod = retailer.allowCod ?? true;
+    const provider = (retailer.paymentProvider || 'cod').toLowerCase();
+    const hasRealGateway = !['cod', 'mock', 'assisted'].includes(provider);
+
+    // If only one method is possible, skip selection
+    if (!hasRealGateway || !allowCod) {
+      // Auto-select the only available method
+      const state = this.checkoutSessions.get(ctx.from?.id?.toString() ?? '');
+      if (state) {
+        // If COD is disabled, we MUST use gateway (even if it's just mock/assisted)
+        // If COD is enabled but there's no real online gateway, we prefer COD
+        state.paymentMethod = !allowCod ? 'gateway' : 'cod';
+        state.step = 'confirm';
+        this.checkoutSessions.set(ctx.from?.id?.toString() ?? '', state);
+        await this.showOrderSummary(ctx, ctx.from?.id?.toString() ?? '', state.storeSlug, state);
+      }
+      return;
+    }
+
+    const kb = new InlineKeyboard();
+    const onlineLabel = provider === 'assisted' 
+      ? `💳 ${retailer.assistedLabel || 'Bank / GCash'}`
+      : '💳 Pay Online';
+
+    if (allowCod) kb.text('💵 Cash on Delivery', `pmnt:cod:${slug}`).row();
+    if (hasRealGateway) kb.text(onlineLabel, `pmnt:gateway:${slug}`).row();
+    kb.text('❌ Cancel', `cancel:${slug}`);
+
+    await ctx.reply('💳 <b>How would you like to pay?</b>', {
+      parse_mode: 'HTML',
+      reply_markup: kb,
+    });
   }
 }

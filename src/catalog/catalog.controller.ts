@@ -135,6 +135,10 @@ export class CatalogController {
       paymentApiKey?:        string | null;
       paymentPublicKey?:     string | null;
       paymentWebhookSecret?: string | null;
+      paymentInstructions?: string | null;
+      paymentLinkTemplate?: string | null;
+      assistedLabel?:       string | null;
+      allowCod?:            boolean;
     },
   ) {
     const retailer = await this.validateKey(slug, platformKey);
@@ -149,6 +153,10 @@ export class CatalogController {
       paymentApiKey:        body.paymentApiKey        ?? null,
       paymentPublicKey:     body.paymentPublicKey     ?? null,
       paymentWebhookSecret: webhookSecret,
+      paymentInstructions:  body.paymentInstructions   ?? null,
+      paymentLinkTemplate:  body.paymentLinkTemplate   ?? null,
+      assistedLabel:        body.assistedLabel        ?? null,
+      allowCod:             body.allowCod             ?? true,
     });
 
     return { message: `Payment config updated for "${slug}".` };

@@ -1,0 +1,36 @@
+// ─── Order Attachments ───────────────────────────────────────────────────────
+// Notes and files mirrored from the seller's SQLite.
+
+model OrderNote {
+  id        Int       @id @default(autoincrement())
+  paymentId Int       @map("payment_id")
+  note      String
+  createdBy String    @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  payment   Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("order_notes")
+}
+
+model OrderFile {
+  id           Int       @id @default(autoincrement())
+  paymentId    Int       @map("payment_id")
+  filename     String
+  originalName String    @map("original_name")
+  fileUrl      String    @map("file_url")    // absolute URL from seller
+  mimeType     String    @map("mime_type")
+  sizeBytes    Int       @map("size_bytes")
+  uploadedBy   String    @map("uploaded_by")
+  uploadedAt   DateTime  @default(now()) @map("uploaded_at")
+  deletedAt    DateTime? @map("deleted_at")
+  deletedBy    String?   @map("deleted_by")
+
+  payment      Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("order_files")
+}

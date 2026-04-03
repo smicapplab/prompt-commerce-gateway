@@ -20,14 +20,18 @@ Experience Prompt Commerce in action:
 prompt-commerce-gateway/
   src/
     catalog/        ← Product cache (CachedProduct, CachedCategory) + Unified Search + delta sync
-    payments/       ← Payment adapter pattern (Mock / PayMongo / Stripe)
+    orders/         ← Order sync receiver, gateway order ledger, fulfillment metrics
+    payments/       ← Payment adapter pattern (Mock / COD / Assisted / PayMongo / Stripe)
     registry/       ← Retailer registry + gateway key issuance
-    settings/       ← Key-value store for bot token, global config
-    telegram/       ← Telegram bot (grammy) + AI chat + persistent cart
+    settings/       ← Key-value store for bot token, global config, default payment provider
+    telegram/       ← Telegram bot (grammy) + AI chat + persistent cart + order status notifications
     mcp/            ← retailer-client.ts — HTTP calls to seller MCP server
-    public/         ← Static HTML: landing, register.html, admin.html
+  frontend/
+    src/routes/
+      admin/        ← SvelteKit 5 admin dashboard (retailers, orders, payments, settings tabs)
+      stores/       ← Public web storefront (store directory, product grid, cross-store search)
   prisma/
-    schema/         ← Split schema files (retailers, catalog, carts, payments, settings, admin)
+    schema/         ← Split schema files (retailers, catalog, carts, payments, order-attachments, settings, admin)
 ```
 
 **Port:** 3002
@@ -91,27 +95,46 @@ The gateway parses natural language queries into structured filters (price, stoc
 ### Checkout & Order Flow
 
 - **Multi-step checkout in-bot** — customers provide name, email, and delivery address through a guided conversation.
+- **Dynamic Delivery Options** — supports both **Home Delivery** and **Store Pickup** based on seller settings.
 - **Input validation** — name (1–100 chars), email (RFC-compliant regex + 254-char max), address (1–300 chars).
-- **Order rate limiting** — atomic one-order-per-30-seconds guard per user to prevent double-submissions and race conditions.
-- **Seller notifications** — after every successful order, the seller receives a Telegram message (if `telegramNotifyChatId` is configured) with item breakdown, total, and buyer info. Failures are logged to the admin Audit Log.
-- **Robust Order Tracking** — gateway uses structured JSON responses from the seller MCP for reliable order ID extraction.
-- Orders are created on the seller via the MCP `create_order` tool, so all order data lives in the seller's SQLite.
+- **Order rate limiting** — atomic one-order-per-30-seconds guard per user to prevent double-submissions.
+- **Automated Customer Notifications** — buyers receive real-time Telegram updates for every status change (e.g., "Order is being packed", "Out for delivery").
+- **Robust Order Tracking** — full support for tracking numbers and courier links mirrored from the seller.
 
-### Payment Integration (Strategy Pattern)
+### Payment Integration (Universal Adapter)
 
 Supports multiple payment providers via a pluggable adapter:
 
 | Provider | Method |
 |----------|--------|
-| **Mock** | Instant `paid` status with token-based CSRF protection for risk-free testing |
+| **Mock** | Instant `paid` status for risk-free testing |
+| **COD** | Cash on Delivery flow with manual seller confirmation |
+| **Assisted** | Offline payments (Bank, GCash QR) with customizable buyer instructions |
 | **PayMongo** | GCash, Maya, GrabPay (redirect) with link-specific webhook handling |
 | **Stripe** | Hosted Checkout Sessions (cards, worldwide) |
 
-Payment config is pushed automatically from the seller admin on every save — no manual gateway configuration needed.
+Payment config is pushed automatically from the seller admin on every save — no manual gateway configuration needed. Platform admins can also set network-wide **default providers** and instructions.
 
-**Webhook security:** All incoming payment webhooks (`POST /webhooks/payment/:slug`) are HMAC-verified. Raw request body is preserved in `main.ts` via a custom `verify` callback for signature checking. Payment status updates are deduplicated to prevent redundant Telegram notifications.
+### Network Order Dashboard (Admin Only)
 
-**Order lifecycle:** `pending` → `paid` → `picking` → `packing` → `ready_for_pickup` → `in_transit` → `delivered` (plus `cancelled` / `refunded`).
+A centralized ledger for managing orders across the entire retail network:
+- **Global Order Ledger**: View and filter orders from all stores by status, delivery type, or date.
+- **Fulfillment Metrics**: Track average fulfillment time (Creation → Terminal Status) per store or across the network.
+- **Internal History**: View mirrored order timelines and collaborative notes from sellers.
+- **Attachment Viewing**: Access receipts and documents attached by sellers directly from the gateway dashboard.
+
+**Order lifecycle:**
+
+```
+pending_payment → paid ──────────────────────────────────────────────────┐
+pending ─────────────────────────────────────────────────────────────────┤
+paid ─────────────── picking → packing → in_transit → delivered          │
+                                       ↘ ready_for_pickup → picked_up   │
+                                                                          ↓
+                                                      cancelled / refunded
+```
+
+COD and Assisted orders start at `pending_payment`; the seller manually marks them `paid` once payment is confirmed. Pickup orders follow the `ready_for_pickup → picked_up` branch and cannot transition to `in_transit`.
 
 ### AI Chat & Conversation Mirroring
 
@@ -144,7 +167,8 @@ All config is pushed from the seller; the gateway never has its own config UIs f
 | Endpoint | What it receives |
 |----------|-----------------|
 | `PATCH /api/stores/:slug/ai-config` | AI provider, API key, model, system prompt |
-| `PATCH /api/stores/:slug/payment-config` | Payment provider, secret key, public key, webhook secret |
+| `PATCH /api/stores/:slug/payment-config` | Payment provider, secret key, public key, webhook secret, payment instructions, link template |
+| `PATCH /api/stores/:slug/store-config` | `allowsPickup` flag (enables pickup delivery option in Telegram checkout) |
 | `PATCH /api/stores/:slug/telegram-config` | Seller's Telegram notification chat ID |
 
 Each has a corresponding `GET …/status` endpoint polled by the seller UI to confirm the push landed.
@@ -152,8 +176,7 @@ Each has a corresponding `GET …/status` endpoint polled by the seller UI to co
 ### Retailer Registry & Admin Panel
 
 - **Public registration** (`/register.html`) — retailers submit store details for verification.
-- **Admin panel** (`/admin.html`) — verify stores, issue `gk_` platform keys, suspend/reactivate.
-- **Settings tab** — configure the Telegram bot token without restarting the server.
+- **Admin dashboard** (`/admin` — SvelteKit 5 frontend) — verify stores, issue `gk_` platform keys, suspend/reactivate, view the network order ledger, and configure the Telegram bot token without restarting the server.
 
 ---
 
@@ -240,7 +263,7 @@ https://gateway.example.com/webhooks/payment/<store-slug>
 
 ## API Reference
 
-### Sync
+### Product & Category Sync
 
 ```
 POST /api/stores/:slug/sync
@@ -249,11 +272,28 @@ Body (delta):    { upsert: { categories, products }, delete: { categoryIds, prod
 Body (snapshot): { categories, products }
 ```
 
-### AI Config (pushed from seller)
+### Order Sync
+
+```
+POST /api/stores/:slug/orders/sync
+Headers: x-gateway-key: <platform_key>
+Body: {
+  upsert: {
+    orders:     [{ id, status, delivery_type, tracking_number, ... }],
+    orderNotes: [{ id, order_id, note, created_by, deleted_at, ... }],
+    orderFiles: [{ id, order_id, file_url, mime_type, size_bytes, ... }]
+  }
+}
+```
+
+Pushed in 500-row batches by the seller whenever dirty rows (`is_synced = 0`) exist. Buyer receives a Telegram notification on every status change.
+
+### Config Push (from seller)
 
 ```
 PATCH /api/stores/:slug/ai-config
 PATCH /api/stores/:slug/payment-config
+PATCH /api/stores/:slug/store-config
 PATCH /api/stores/:slug/telegram-config
 Headers: x-gateway-key: <platform_key>
 ```

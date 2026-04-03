@@ -22,6 +22,18 @@ export interface StoreAiConfig {
   serperApiKey?: string | null;  // for search_images tool
 }
 
+// ─── Structured chat result (text + optional product buttons) ────────────────
+export interface ProductButton {
+  id:    number;
+  title: string;
+  price: number | null;
+}
+
+export interface ChatResult {
+  text:      string;
+  products?: ProductButton[];
+}
+
 const DEFAULT_MODELS: Record<string, string> = {
   claude: 'claude-3-5-haiku-20241022',
   gemini: 'gemini-1.5-flash',
@@ -146,7 +158,7 @@ export class AiChatService {
     userMessage: string,
     config: StoreAiConfig,
     conversationId?: number,
-  ): Promise<string> {
+  ): Promise<ChatResult> {
     this.logger.log(`[AiChat] Message from user ${userId} for store ${storeSlug}: "${userMessage}"`);
 
     // ── Load history from DB if conversation exists ──────────────────────────
@@ -163,21 +175,21 @@ export class AiChatService {
         } as Anthropic.MessageParam));
     }
 
-    let reply: string;
+    let result: ChatResult;
     if (config.provider === 'gemini') {
-      reply = await this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
+      result = await this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
     } else if (config.provider === 'openai') {
-      reply = await this.chatOpenAi(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
+      result = await this.chatOpenAi(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
     } else {
-      reply = await this.chatClaude(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
+      result = await this.chatClaude(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
     }
 
     // ── Unified Logging: Log AI reply ──
     if (conversationId) {
-      await this.conversationService.logMessage(conversationId, storeSlug, 'ai', reply, 'AI Bot');
+      await this.conversationService.logMessage(conversationId, storeSlug, 'ai', result.text, 'AI Bot');
     }
 
-    return reply;
+    return result;
   }
 
   // ─── Claude (Anthropic) ──────────────────────────────────────────────────
@@ -190,7 +202,7 @@ export class AiChatService {
     config: StoreAiConfig,
     conversationId?: number,
     history: Anthropic.MessageParam[] = [],
-  ): Promise<string> {
+  ): Promise<ChatResult> {
     const client = new Anthropic({ apiKey: config.apiKey });
     const model  = config.model ?? DEFAULT_MODELS.claude;
 
@@ -202,6 +214,7 @@ export class AiChatService {
 
     const messages: Anthropic.MessageParam[] = [...history, { role: 'user', content: userMessage }];
     let finalText = '';
+    let capturedProducts: ProductButton[] = [];
     const deadline = Date.now() + 30_000;
 
     for (let round = 0; round < 5; round++) {
@@ -230,16 +243,26 @@ export class AiChatService {
 
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const tool of toolCalls) {
-        results.push({
-          type: 'tool_result',
-          tool_use_id: tool.id,
-          content: await this.callTool(retailer, tool.name, tool.input as Record<string, unknown>, config, conversationId),
-        });
+        const toolResult = await this.callTool(retailer, tool.name, tool.input as Record<string, unknown>, config, conversationId);
+        if (tool.name === 'search_products') {
+          try {
+            const parsed = JSON.parse(toolResult);
+            if (parsed.products?.length) {
+              capturedProducts = parsed.products.map((p: any) => ({
+                id: p.id, title: p.title, price: p.price ?? null,
+              }));
+            }
+          } catch { /* not JSON or no products field */ }
+        }
+        results.push({ type: 'tool_result', tool_use_id: tool.id, content: toolResult });
       }
       messages.push({ role: 'user', content: results });
     }
 
-    return finalText || 'Sorry, I could not process that request.';
+    return {
+      text:     finalText || 'Sorry, I could not process that request.',
+      products: capturedProducts.length ? capturedProducts : undefined,
+    };
   }
 
   // ─── Gemini (Google) ─────────────────────────────────────────────────────
@@ -252,7 +275,7 @@ export class AiChatService {
     config: StoreAiConfig,
     conversationId?: number,
     history: Anthropic.MessageParam[] = [],
-  ): Promise<string> {
+  ): Promise<ChatResult> {
     const genAI = new GoogleGenerativeAI(config.apiKey);
     const model = genAI.getGenerativeModel({
       model: config.model ?? DEFAULT_MODELS.gemini,
@@ -275,6 +298,7 @@ export class AiChatService {
 
     let response = await chat.sendMessage(userMessage);
     let finalText = '';
+    let capturedProducts: ProductButton[] = [];
     const deadline = Date.now() + 30_000;
 
     // Agentic tool-use loop
@@ -292,15 +316,22 @@ export class AiChatService {
         break;
       }
 
-      // Execute each function call and feed results back
-      const fnResults = await Promise.all(
-        fnCalls.map(async p => ({
-          functionResponse: {
-            name: p.functionCall!.name,
-            response: { result: await this.callTool(retailer, p.functionCall!.name, p.functionCall!.args as Record<string, unknown>, config, conversationId) },
-          },
-        }))
-      );
+      // Execute each function call sequentially so we can capture products
+      const fnResults: any[] = [];
+      for (const p of fnCalls) {
+        const toolResult = await this.callTool(retailer, p.functionCall!.name, p.functionCall!.args as Record<string, unknown>, config, conversationId);
+        if (p.functionCall!.name === 'search_products') {
+          try {
+            const parsed = JSON.parse(toolResult);
+            if (parsed.products?.length) {
+              capturedProducts = parsed.products.map((pr: any) => ({
+                id: pr.id, title: pr.title, price: pr.price ?? null,
+              }));
+            }
+          } catch { /* not JSON */ }
+        }
+        fnResults.push({ functionResponse: { name: p.functionCall!.name, response: { result: toolResult } } });
+      }
 
       response = await chat.sendMessage(fnResults);
     }
@@ -310,7 +341,10 @@ export class AiChatService {
       finalText = parts.map(p => p.text ?? '').join('').trim();
     }
 
-    return finalText || 'Sorry, I could not process that request.';
+    return {
+      text:     finalText || 'Sorry, I could not process that request.',
+      products: capturedProducts.length ? capturedProducts : undefined,
+    };
   }
 
   // ─── OpenAI ──────────────────────────────────────────────────────────────
@@ -323,7 +357,7 @@ export class AiChatService {
     config: StoreAiConfig,
     conversationId?: number,
     history: Anthropic.MessageParam[] = [],
-  ): Promise<string> {
+  ): Promise<ChatResult> {
     const client = new OpenAI({ apiKey: config.apiKey });
     const model  = config.model ?? DEFAULT_MODELS.openai;
     const deadline = Date.now() + 30_000;
@@ -361,6 +395,7 @@ export class AiChatService {
     ];
 
     let finalText = '';
+    let capturedProducts: ProductButton[] = [];
 
     for (let round = 0; round < 5; round++) {
       if (Date.now() > deadline) {
@@ -381,15 +416,24 @@ export class AiChatService {
         const fn = (tc as any).function as { name: string; arguments: string };
         const args = JSON.parse(fn.arguments || '{}');
         const result = await this.callTool(retailer, fn.name, args, config, conversationId);
-        messages.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: result,
-        });
+        if (fn.name === 'search_products') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed.products?.length) {
+              capturedProducts = parsed.products.map((p: any) => ({
+                id: p.id, title: p.title, price: p.price ?? null,
+              }));
+            }
+          } catch { /* not JSON */ }
+        }
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
       }
     }
 
-    return finalText || 'Sorry, I could not process that request.';
+    return {
+      text:     finalText || 'Sorry, I could not process that request.',
+      products: capturedProducts.length ? capturedProducts : undefined,
+    };
   }
 
   // ─── Shared: call a store MCP tool ──────────────────────────────────────

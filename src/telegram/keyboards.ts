@@ -53,14 +53,16 @@ export function categoryKeyboard(
 // ─── Product list (with pagination) ──────────────────────────────────────────
 export function productListKeyboard(
   slug: string,
-  products: Array<{ id: number; title: string }>,
+  products: Array<{ id: number; title: string; price: number | null }>,
   catId: number | string,
   page: number,
   hasMore: boolean,
 ): InlineKeyboard {
+  const ph = (n: number | null) => n == null ? 'TBD' : `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
   const kb = new InlineKeyboard();
   for (const p of products) {
-    kb.text(p.title.slice(0, 40), CB.prod(slug, p.id)).row();
+    const label = `${p.title.slice(0, 35)} (${ph(p.price)})`;
+    kb.text(label, CB.prod(slug, p.id)).row();
   }
   // Pagination row
   if (page > 0 || hasMore) {
@@ -131,6 +133,23 @@ export function aiModeKeyboard(slug: string): InlineKeyboard {
   return new InlineKeyboard()
     .text('🛒 View Cart',    CB.cart(slug))
     .text('🏪 Back to Store', CB.back(slug));
+}
+
+// ─── AI mode with product buttons ────────────────────────────────────────────
+// Shown after an AI search response — each found product is a tappable button.
+export function aiProductKeyboard(
+  slug: string,
+  products: Array<{ id: number; title: string; price: number | null }>,
+): InlineKeyboard {
+  const ph = (n: number | null) => n == null ? 'TBD' : `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
+  const kb = new InlineKeyboard();
+  for (const p of products) {
+    const label = `${p.title.slice(0, 30)} (${ph(p.price)})`;
+    kb.text(label, CB.prod(slug, p.id)).row();
+  }
+  kb.text('🛒 View Cart', CB.cart(slug))
+    .text('🏪 Back to Store', CB.back(slug));
+  return kb;
 }
 
 // ─── Back to store only ───────────────────────────────────────────────────────

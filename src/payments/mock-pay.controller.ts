@@ -8,6 +8,7 @@ import {
   Query,
   Res,
   NotFoundException,
+  UnauthorizedException,
   Logger,
 } from '@nestjs/common';
 import { Response } from 'express';

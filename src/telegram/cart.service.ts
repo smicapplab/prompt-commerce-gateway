@@ -101,10 +101,10 @@ export class CartService {
           where: { storeSlug_sellerId: { storeSlug, sellerId: item.productId } },
         });
 
-        if (!product || !product.active || product.price !== item.price) {
+        if (!product || !product.active || product.price === null || product.price !== item.price) {
           changed = true;
-          if (!product || !product.active) {
-            // Product no longer available — remove from cart
+          if (!product || !product.active || product.price === null) {
+            // Product no longer available or has no price — remove from cart
             await tx.cart.deleteMany({
               where: { userId, storeSlug, productId: item.productId },
             });
@@ -112,9 +112,9 @@ export class CartService {
             // Update price in cart
             await tx.cart.update({
               where: { id: item.id },
-              data: { price: product.price ?? 0 },
+              data: { price: product.price },
             });
-            newTotal += (product.price ?? 0) * item.quantity;
+            newTotal += product.price * item.quantity;
           }
         } else {
           newTotal += item.price * item.quantity;

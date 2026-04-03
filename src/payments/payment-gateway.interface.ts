@@ -13,6 +13,7 @@ export interface OrderContext {
   successUrl:  string;   // redirect after successful payment (for hosted pages)
   cancelUrl:   string;   // redirect on cancel
   apiKey?:     string;   // secret key for the provider (injected by PaymentService)
+  paymentLinkTemplate?: string; // for Assisted Payments (e.g. "https://pay.me/{{orderId}}")
 }
 
 export interface PaymentResult {

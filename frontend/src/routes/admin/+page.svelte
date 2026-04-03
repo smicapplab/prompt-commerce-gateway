@@ -22,6 +22,8 @@
     Info,
     MessageSquare,
     X,
+    CreditCard,
+    ShoppingBag,
   } from "lucide-svelte";
   import Header from "$lib/components/Header.svelte";
 
@@ -37,11 +39,22 @@
   let loginError = $state("");
 
   // Dashboard State
-  let currentTab = $state<"pending" | "verified" | "all" | "chat" | "settings">(
+  let currentTab = $state<"pending" | "verified" | "all" | "chat" | "payments" | "orders" | "settings">(
     "pending",
   );
   let retailers = $state<any[]>([]);
   let isLoadingRetailers = $state(false);
+
+  // Orders State
+  let orders = $state<any[]>([]);
+  let ordersTotal = $state(0);
+  let orderStats = $state<any>(null);
+  let isLoadingOrders = $state(false);
+  let orderStoreFilter = $state("");
+  let orderStatusFilter = $state("");
+  let orderPage = $state(1);
+  let orderExpandedId = $state<number | null>(null);
+  let showDeletedOrderItems = $state(false);
 
   // Chat Log State
   let conversations = $state<any[]>([]);
@@ -65,6 +78,15 @@
   let isSavingSettings = $state(false);
   let settingsSavedMsg = $state("");
   let settingsError = $state("");
+
+  // Payment Settings
+  let defaultPaymentProvider = $state("cod");
+  let defaultPaymentInstructions = $state("");
+  let defaultPaymentLinkTemplate = $state("");
+  let defaultPaymentLabel = $state("Assisted Payment");
+  let isSavingPayments = $state(false);
+  let paymentsSavedMsg = $state("");
+  let paymentsError = $state("");
 
   // Toast
   let toastMsg = $state("");
@@ -305,12 +327,71 @@
     }
   }
 
-  function switchTab(tab: "pending" | "verified" | "all" | "chat" | "settings") {
+  async function loadPaymentSettings() {
+    paymentsSavedMsg = "";
+    paymentsError = "";
+    const [provider, instructions, template, label] = await Promise.all([
+      api("GET", "/api/settings/default_payment_provider"),
+      api("GET", "/api/settings/default_payment_instructions"),
+      api("GET", "/api/settings/default_payment_link_template"),
+      api("GET", "/api/settings/default_payment_label"),
+    ]);
+
+    if (provider?.value) defaultPaymentProvider = provider.value;
+    if (instructions?.value) defaultPaymentInstructions = instructions.value;
+    if (template?.value) defaultPaymentLinkTemplate = template.value;
+    if (label?.value) defaultPaymentLabel = label.value;
+  }
+
+  async function savePaymentSettings() {
+    paymentsSavedMsg = "";
+    paymentsError = "";
+    isSavingPayments = true;
+
+    try {
+      await Promise.all([
+        api("PUT", "/api/settings/default_payment_provider", { value: defaultPaymentProvider }),
+        api("PUT", "/api/settings/default_payment_instructions", { value: defaultPaymentInstructions }),
+        api("PUT", "/api/settings/default_payment_link_template", { value: defaultPaymentLinkTemplate }),
+        api("PUT", "/api/settings/default_payment_label", { value: defaultPaymentLabel }),
+      ]);
+      paymentsSavedMsg = "Payment settings saved.";
+      setTimeout(() => {
+        paymentsSavedMsg = "";
+      }, 4000);
+    } catch (err: any) {
+      paymentsError = err.message ?? "Save failed";
+    } finally {
+      isSavingPayments = false;
+    }
+  }
+
+  async function loadOrders() {
+    isLoadingOrders = true;
+    const params = new URLSearchParams();
+    if (orderStoreFilter) params.append("store", orderStoreFilter);
+    if (orderStatusFilter) params.append("status", orderStatusFilter);
+    params.append("page", String(orderPage));
+    
+    const data = await api("GET", `/api/orders?${params}`);
+    isLoadingOrders = false;
+    if (data) {
+      orders = data.orders;
+      ordersTotal = data.total;
+      orderStats = data.stats;
+    }
+  }
+
+  function switchTab(tab: "pending" | "verified" | "all" | "chat" | "payments" | "orders" | "settings") {
     currentTab = tab;
     showKeyBanner = false;
     clearInterval(chatPollingInterval);
     if (tab === "settings") {
       loadSettings();
+    } else if (tab === "payments") {
+      loadPaymentSettings();
+    } else if (tab === "orders") {
+      loadOrders();
     } else if (tab === "chat") {
       loadConversations();
     } else {
@@ -526,6 +607,16 @@
           <MessageSquare size={22} strokeWidth={2.5} /> Chat Log
         </button>
 
+        <button
+          onclick={() => switchTab("orders")}
+          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
+          'orders'
+            ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
+            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
+        >
+          <ShoppingBag size={22} strokeWidth={2.5} /> Global Orders
+        </button>
+
         <h3
           class="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mt-10 mb-4 ml-1"
         >
@@ -540,6 +631,16 @@
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
         >
           <Settings size={22} strokeWidth={2.5} /> Settings
+        </button>
+
+        <button
+          onclick={() => switchTab("payments")}
+          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
+          'payments'
+            ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
+            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
+        >
+          <CreditCard size={22} strokeWidth={2.5} /> Payments
         </button>
       </div>
 
@@ -572,14 +673,20 @@
                     ? "All Retailers"
                     : currentTab === "chat"
                       ? "Global Chat Log"
-                      : "Gateway Settings"}
+                      : currentTab === "orders"
+                        ? "Network Order Dashboard"
+                        : currentTab === "payments"
+                        ? "Gateway Payments"
+                        : "Gateway Settings"}
             </h1>
             <p class="text-gray-500 font-medium text-lg mt-2">
               {currentTab === "settings"
                 ? "Global gateway configuration and bot secrets."
-                : currentTab === "chat"
-                  ? "Monitor real-time conversations across all stores."
-                  : "Review and manage store certifications."}
+                : currentTab === "payments"
+                  ? "Global default payment providers and offline instructions."
+                  : currentTab === "chat"
+                    ? "Monitor real-time conversations across all stores."
+                    : "Review and manage store certifications."}
             </p>
           </div>
 
@@ -715,6 +822,293 @@
                   {/if}
                 </button>
               </div>
+            </div>
+          </div>
+        {:else if currentTab === "payments"}
+          <!-- Payments Panel -->
+          <div
+            class="max-w-2xl bg-white border border-gray-200 rounded-[2.5rem] p-10 md:p-14 shadow-2xl shadow-gray-200/50 relative overflow-hidden"
+          >
+            <div
+              class="absolute -top-20 -right-20 w-64 h-64 bg-emerald-50/50 blur-3xl rounded-full pointer-events-none"
+            ></div>
+
+            <div class="relative z-10 flex flex-col gap-10">
+              <div>
+                <div class="flex items-center gap-4 mb-8">
+                  <div
+                    class="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center shadow-sm"
+                  >
+                    <CreditCard size={28} strokeWidth={2.5} />
+                  </div>
+                  <div>
+                    <h2
+                      class="text-2xl font-black text-gray-900 tracking-tight"
+                    >
+                      Default Payment Settings
+                    </h2>
+                    <p
+                      class="text-gray-400 font-medium text-sm mt-0.5"
+                    >
+                      Fallbacks for stores with no payment config
+                    </p>
+                  </div>
+                </div>
+
+                <div class="space-y-8">
+                  <div>
+                    <span class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1">Default Provider</span>
+                    <div class="grid grid-cols-2 gap-3">
+                      {#each [["mock", "📦 Mock"], ["cod", "💵 COD"], ["assisted", "🤝 Assisted"]] as [pid, label]}
+                        <button
+                          onclick={() => defaultPaymentProvider = pid}
+                          class="rounded-2xl border-2 px-6 py-4 text-sm font-black transition-all
+                            {defaultPaymentProvider === pid
+                            ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-lg shadow-blue-500/10'
+                            : 'border-gray-100 text-gray-500 hover:border-gray-200 hover:bg-gray-50'}"
+                          >{label}</button
+                        >
+                      {/each}
+                    </div>
+                  </div>
+
+                  {#if defaultPaymentProvider === "assisted"}
+                    <div class="p-8 bg-blue-50/50 rounded-3xl border border-blue-100 space-y-6">
+                      <div>
+                        <label for="assisted-label" class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1">Assisted Label</label>
+                        <input
+                          id="assisted-label"
+                          type="text"
+                          bind:value={defaultPaymentLabel}
+                          placeholder="e.g. Bank Transfer"
+                          class="w-full bg-white border border-blue-100 rounded-2xl px-6 py-4 text-gray-900 font-bold focus:outline-none focus:border-blue-500 transition-all placeholder:text-gray-300 shadow-sm"
+                        />
+                      </div>
+                      <div>
+                        <label for="default-instructions" class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1">Default Instructions</label>
+                        <textarea
+                          id="default-instructions"
+                          bind:value={defaultPaymentInstructions}
+                          rows="3"
+                          placeholder="Instructions shown to the buyer..."
+                          class="w-full bg-white border border-blue-100 rounded-2xl px-6 py-4 text-gray-900 font-bold focus:outline-none focus:border-blue-500 transition-all placeholder:text-gray-300 shadow-sm"
+                        ></textarea>
+                      </div>
+                      <div>
+                        <label for="default-link-template" class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1">Default Link Template</label>
+                        <input
+                          id="default-link-template"
+                          type="text"
+                          bind:value={defaultPaymentLinkTemplate}
+                          placeholder="https://pay.me/..."
+                          class="w-full bg-white border border-blue-100 rounded-2xl px-6 py-4 text-gray-900 font-mono text-sm font-bold focus:outline-none focus:border-blue-500 transition-all placeholder:text-gray-300 shadow-sm"
+                        />
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+
+                {#if paymentsSavedMsg}
+                  <div
+                    class="text-emerald-700 text-sm font-black mt-8 flex items-center gap-3 bg-emerald-50 px-6 py-4 rounded-2xl border border-emerald-100 animate-in zoom-in-95"
+                  >
+                    <CheckCircle2 size={18} />
+                    {paymentsSavedMsg}
+                  </div>
+                {/if}
+
+                {#if paymentsError}
+                  <div
+                    class="bg-red-50 border border-red-100 text-red-600 px-6 py-4 rounded-2xl text-sm font-black mt-8 flex items-center gap-3"
+                  >
+                    <AlertTriangle size={18} />
+                    {paymentsError}
+                  </div>
+                {/if}
+
+                <button
+                  onclick={savePaymentSettings}
+                  disabled={isSavingPayments}
+                  class="w-full bg-gray-900 hover:bg-black text-white py-6 px-8 rounded-3xl font-black text-xl transition-all shadow-2xl active:scale-95 disabled:opacity-70 flex items-center justify-center gap-4 mt-10"
+                >
+                  {#if isSavingPayments}
+                    <Loader2 class="w-7 h-7 animate-spin px-1" />
+                    <span>Saving Changes...</span>
+                  {:else}
+                    Save Payment Settings
+                  {/if}
+                </button>
+              </div>
+            </div>
+          </div>
+        {:else if currentTab === "orders"}
+          <!-- Orders Panel -->
+          <div class="space-y-8">
+            <!-- Stats Grid -->
+            {#if orderStats}
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm">
+                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Total Orders</p>
+                  <p class="text-3xl font-black text-gray-900">{ordersTotal}</p>
+                </div>
+                <div class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm">
+                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Avg Fulfillment</p>
+                  <p class="text-3xl font-black text-blue-600">{orderStats.avgFulfillmentHours.toFixed(1)}h</p>
+                </div>
+                <div class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm">
+                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Pending</p>
+                  <p class="text-3xl font-black text-amber-500">
+                    {orderStats.byStatus.find(s => s.orderStatus === 'pending')?._count ?? 0}
+                  </p>
+                </div>
+                <div class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm">
+                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Delivered</p>
+                  <p class="text-3xl font-black text-emerald-600">
+                    {orderStats.byStatus.find(s => s.orderStatus === 'delivered')?._count ?? 0}
+                  </p>
+                </div>
+              </div>
+            {/if}
+
+            <!-- Filters -->
+            <div class="flex flex-wrap gap-4 bg-white border border-gray-200 rounded-[2rem] p-6 shadow-sm">
+              <div class="flex-1 min-w-[200px]">
+                <select 
+                  bind:value={orderStoreFilter} 
+                  onchange={() => { orderPage = 1; loadOrders(); }}
+                  class="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:border-blue-500 transition-all"
+                >
+                  <option value="">All Stores</option>
+                  {#each retailers as r}
+                    <option value={r.slug}>{r.name}</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="flex-1 min-w-[200px]">
+                <select 
+                  bind:value={orderStatusFilter} 
+                  onchange={() => { orderPage = 1; loadOrders(); }}
+                  class="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:border-blue-500 transition-all"
+                >
+                  <option value="">All Statuses</option>
+                  {#each ["pending_payment", "pending", "paid", "picking", "packing", "ready_for_pickup", "picked_up", "in_transit", "delivered", "cancelled", "refunded"] as s}
+                    <option value={s}>{s.replace(/_/g, ' ').toUpperCase()}</option>
+                  {/each}
+                </select>
+              </div>
+              <button
+                onclick={loadOrders}
+                class="p-3 bg-gray-900 text-white rounded-xl hover:bg-black transition-all active:scale-95"
+              >
+                <RotateCw size={20} class={isLoadingOrders ? 'animate-spin' : ''} />
+              </button>
+            </div>
+
+            <!-- Orders Table -->
+            <div class="bg-white border border-gray-200 rounded-[2.5rem] shadow-xl shadow-gray-200/50 overflow-hidden">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-gray-50/50 border-b border-gray-100">
+                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Order ID</th>
+                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Store</th>
+                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Buyer</th>
+                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Status</th>
+                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Total</th>
+                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50">
+                  {#if isLoadingOrders}
+                    <tr><td colspan="6" class="px-8 py-24 text-center text-gray-400 font-bold">Loading order ledger...</td></tr>
+                  {:else if orders.length === 0}
+                    <tr><td colspan="6" class="px-8 py-24 text-center text-gray-400 font-bold">No orders found.</td></tr>
+                  {:else}
+                    {#each orders as o}
+                      <tr class="group hover:bg-gray-50/30 transition-colors">
+                        <td class="px-8 py-6 font-mono text-xs font-black text-blue-600">#{String(o.orderId).padStart(6, '0')}</td>
+                        <td class="px-8 py-6">
+                          <span class="text-sm font-bold text-gray-900">{o.storeSlug}</span>
+                        </td>
+                        <td class="px-8 py-6">
+                          <span class="text-sm font-bold text-gray-500">{o.buyerRef}</span>
+                        </td>
+                        <td class="px-8 py-6">
+                          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border
+                            {o.orderStatus === 'delivered' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
+                             o.orderStatus === 'cancelled' ? 'bg-red-50 text-red-700 border-red-100' :
+                             'bg-blue-50 text-blue-700 border-blue-100'}">
+                            {o.orderStatus.replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                        <td class="px-8 py-6 font-black text-gray-900">
+                          {new Intl.NumberFormat('en-PH', { style: 'currency', currency: o.currency }).format(o.amount)}
+                        </td>
+                        <td class="px-8 py-6 text-right">
+                          <button 
+                            onclick={() => orderExpandedId = orderExpandedId === o.id ? null : o.id}
+                            class="text-[10px] font-black text-gray-400 hover:text-gray-900 uppercase tracking-widest"
+                          >
+                            {orderExpandedId === o.id ? 'Close' : 'View Detail'}
+                          </button>
+                        </td>
+                      </tr>
+                      {#if orderExpandedId === o.id}
+                        <tr class="bg-gray-50/50">
+                          <td colspan="6" class="px-12 py-10">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+                              <div>
+                                <h4 class="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-6">Fulfillment Details</h4>
+                                <div class="space-y-4">
+                                  <div class="flex justify-between border-b border-gray-100 pb-3">
+                                    <span class="text-xs font-bold text-gray-400 uppercase">Delivery Type</span>
+                                    <span class="text-xs font-black text-gray-900 uppercase">{o.deliveryType}</span>
+                                  </div>
+                                  {#if o.trackingNumber}
+                                    <div class="flex justify-between border-b border-gray-100 pb-3">
+                                      <span class="text-xs font-bold text-gray-400 uppercase">Tracking</span>
+                                      <span class="text-xs font-black text-gray-900">{o.courierName}: {o.trackingNumber}</span>
+                                    </div>
+                                  {/if}
+                                  <div class="flex justify-between border-b border-gray-100 pb-3">
+                                    <span class="text-xs font-bold text-gray-400 uppercase">Payment Method</span>
+                                    <span class="text-xs font-black text-gray-900 uppercase">{o.provider}</span>
+                                  </div>
+                                  <div class="flex justify-between border-b border-gray-100 pb-3">
+                                    <span class="text-xs font-bold text-gray-400 uppercase">Created At</span>
+                                    <span class="text-xs font-black text-gray-900">{new Date(o.createdAt).toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div>
+                                <div class="flex items-center justify-between mb-6">
+                                  <h4 class="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Internal Timeline</h4>
+                                  <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" bind:checked={showDeletedOrderItems} class="w-3 h-3 rounded text-blue-600">
+                                    <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">Show Deleted</span>
+                                  </label>
+                                </div>
+                                <div class="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-4">
+                                  {#each (o.orderNotes || []).filter(n => showDeletedOrderItems || !n.deletedAt) as note}
+                                    <div class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm {note.deletedAt ? 'opacity-40 grayscale' : ''}">
+                                      <div class="flex justify-between items-center mb-2">
+                                        <span class="text-[10px] font-black text-blue-600 uppercase">{note.createdBy}</span>
+                                        <span class="text-[9px] font-bold text-gray-300">{new Date(note.createdAt).toLocaleDateString()}</span>
+                                      </div>
+                                      <p class="text-xs font-medium text-gray-600 leading-relaxed">{note.note}</p>
+                                    </div>
+                                  {:else}
+                                    <p class="text-xs text-gray-400 italic">No notes synced for this order.</p>
+                                  {/each}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      {/if}
+                    {/each}
+                  {/if}
+                </tbody>
+              </table>
             </div>
           </div>
         {:else if currentTab === "chat"}

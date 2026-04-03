@@ -18,14 +18,9 @@ export class MockGateway implements PaymentGateway {
     // Generate a deterministic reference ID for traceability
     const referenceId = `mock_${order.storeSlug}_${order.orderId}_${Date.now()}`;
 
-    // Mock returns a redirect URL to our own mock checkout page
-    const baseUrl = order.successUrl.split('/payment/')[0];
-    const paymentUrl = `${baseUrl}/mock-pay?ref=${referenceId}`;
-
     return {
       referenceId,
-      status: 'pending',
-      paymentUrl,
+      status: 'paid', // Confirm instantly - no redirect needed
     };
   }
 

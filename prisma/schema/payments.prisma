@@ -15,10 +15,27 @@ model Payment {
   paymentUrl   String?  @map("payment_url")           // redirect URL for real gateways
   successUrl   String?  @map("success_url")           // internal success redirect
   cancelUrl    String?  @map("cancel_url")            // internal cancel redirect
+
+  // New order-tracking fields
+  orderStatus         String    @default("pending")   @map("order_status") // mirrors seller-side status
+  deliveryType        String    @default("delivery")  @map("delivery_type")
+  trackingNumber      String?   @map("tracking_number")
+  courierName         String?   @map("courier_name")
+  trackingUrl         String?   @map("tracking_url")
+  cancellationReason  String?   @map("cancellation_reason")
+  paymentInstructions String?   @map("payment_instructions") // shown to buyer for COD/Assisted
+  orderCreatedAt      DateTime? @map("order_created_at")     // seller's order.created_at
+  terminalStatusAt    DateTime? @map("terminal_status_at")   // when terminal status reached
+
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt      @map("updated_at")
 
-  @@index([storeSlug])
+  // Relations
+  orderNotes  OrderNote[]
+  orderFiles  OrderFile[]
+
+  @@unique([storeSlug, orderId])
+  @@index([storeSlug, orderId])
   @@index([buyerRef])
   @@map("payments")
 }

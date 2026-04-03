@@ -102,9 +102,8 @@ export class ConversationService {
 
     if (skipMirror) return conv;
 
-  // Mirror to seller app
-  this.mirrorToSeller(conv.storeSlug, 'POST', `/api/conversations/lookup`, {
-...
+    // Mirror to seller app
+    this.mirrorToSeller(conv.storeSlug, 'POST', `/api/conversations/lookup`, {
       buyer_ref: conv.buyerRef,
       channel: conv.channel
     })

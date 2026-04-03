@@ -1,10 +1,13 @@
 // ─── Payment Service ──────────────────────────────────────────────────────────
 // Resolves the correct gateway adapter per store and manages Payment DB records.
 
-import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
+import { SettingsService } from '../settings/settings.service';
 import { MockGateway } from './adapters/mock.gateway';
+import { CodGateway } from './adapters/cod.gateway';
+import { AssistedGateway } from './adapters/assisted.gateway';
 import { PayMongoGateway } from './adapters/paymongo.gateway';
 import { StripeGateway } from './adapters/stripe.gateway';
 import {
@@ -13,6 +16,7 @@ import {
   PaymentStatus,
   WebhookEvent,
 } from './payment-gateway.interface';
+
 
 export interface InitiatePaymentInput {
   orderId:      number;
@@ -24,6 +28,7 @@ export interface InitiatePaymentInput {
   buyerEmail?:  string;
   // These are assembled by the service from env / request:
   baseUrl:      string;   // e.g. https://gateway.example.com  (no trailing slash)
+  providerOverride?: string; // e.g. 'cod' when buyer explicitly chose COD
 }
 
 export interface PaymentRecord {
@@ -44,12 +49,17 @@ export class PaymentService {
 
   constructor(
     @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly settings: SettingsService,
     private readonly mockGateway: MockGateway,
+    private readonly codGateway: CodGateway,
+    private readonly assistedGateway: AssistedGateway,
     private readonly payMongoGateway: PayMongoGateway,
     private readonly stripeGateway: StripeGateway,
   ) {
     this.adapters = new Map<string, PaymentGateway>([
       ['mock',      mockGateway],
+      ['cod',       codGateway],
+      ['assisted',  assistedGateway],
       ['paymongo',  payMongoGateway],
       ['stripe',    stripeGateway],
     ]);
@@ -57,8 +67,15 @@ export class PaymentService {
 
   // ── Resolve adapter ────────────────────────────────────────────────────────
 
-  private resolveAdapter(provider: string | null | undefined): PaymentGateway {
-    const key = (provider ?? 'mock').toLowerCase();
+  private async resolveAdapter(provider: string | null | undefined): Promise<PaymentGateway> {
+    let key = (provider || '').toLowerCase();
+
+    if (!key) {
+      const defaultProvider = await this.settings.get('default_payment_provider');
+      key = (defaultProvider || 'cod').toLowerCase();
+      this.logger.debug(`No store-level provider, using gateway default: ${key}`);
+    }
+
     const adapter = this.adapters.get(key);
     if (!adapter) {
       this.logger.warn(`Unknown payment provider "${key}", falling back to mock`);
@@ -78,8 +95,12 @@ export class PaymentService {
     });
     if (!retailer) throw new NotFoundException(`Store "${input.storeSlug}" not found`);
 
-    const adapter = this.resolveAdapter(retailer.paymentProvider);
+    const adapter = await this.resolveAdapter(input.providerOverride ?? retailer.paymentProvider);
     const provider = adapter.name;
+
+    // Load defaults for Assisted/COD if not overridden
+    let paymentLinkTemplate = await this.settings.get('default_payment_link_template');
+    let instructions = await this.settings.get('default_payment_instructions');
 
     const orderCtx: OrderContext = {
       orderId:    input.orderId,
@@ -92,6 +113,7 @@ export class PaymentService {
       successUrl: `${input.baseUrl}/payment/success?store=${input.storeSlug}&order=${input.orderId}`,
       cancelUrl:  `${input.baseUrl}/payment/cancel?store=${input.storeSlug}&order=${input.orderId}`,
       apiKey:     retailer.paymentApiKey ?? undefined,
+      paymentLinkTemplate: paymentLinkTemplate || undefined,
     };
 
     this.logger.log(`Initiating ${provider} payment for order ${input.orderId} (${input.storeSlug})`);
@@ -112,6 +134,8 @@ export class PaymentService {
         paymentUrl:  result.paymentUrl ?? null,
         successUrl:  orderCtx.successUrl,
         cancelUrl:   orderCtx.cancelUrl,
+        paymentInstructions: instructions,
+        orderCreatedAt:      new Date(),
       },
     });
 
@@ -138,7 +162,7 @@ export class PaymentService {
     });
     if (!retailer) return null;
 
-    const adapter = this.resolveAdapter(retailer.paymentProvider);
+    const adapter = await this.resolveAdapter(retailer.paymentProvider);
     // Use the stored secret, or fall back to 'mock-secret' if it's the mock provider
     const secret = retailer.paymentWebhookSecret || (adapter.name === 'mock' ? 'mock-secret' : '');
 

@@ -8,6 +8,7 @@ import { MailModule } from './mail/mail.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { SettingsModule } from './settings/settings.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { OrdersModule } from './orders/orders.module';
 import { PaymentModule } from './payments/payment.module';
 import { WebhookModule } from './payments/webhook.module';
 import { StorefrontModule } from './storefront/storefront.module';
@@ -24,6 +25,7 @@ import { ChatModule } from './chat/chat.module';
     TelegramModule,
     SettingsModule,
     CatalogModule,
+    OrdersModule,
     PaymentModule,
     WebhookModule,
     StorefrontModule,

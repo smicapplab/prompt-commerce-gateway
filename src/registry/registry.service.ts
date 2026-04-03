@@ -37,6 +37,11 @@ export interface UpdateRetailerDto {
   paymentApiKey?:        string | null;
   paymentPublicKey?:     string | null;
   paymentWebhookSecret?: string | null;
+  paymentInstructions?:  string | null;
+  paymentLinkTemplate?:  string | null;
+  assistedLabel?:        string | null;
+  allowsPickup?:         boolean;
+  allowCod?:             boolean;
 }
 
 @Injectable()
@@ -164,6 +169,13 @@ export class RegistryService {
     return this.prisma.retailer.findMany({
       where: { verified: true, active: true },
       include: { platformKey: true },
+    });
+  }
+
+  async updateBySlug(slug: string, dto: UpdateRetailerDto) {
+    return this.prisma.retailer.update({
+      where: { slug },
+      data: dto,
     });
   }
 }

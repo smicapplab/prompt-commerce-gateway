@@ -1,10 +1,27 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 
 @Injectable()
-export class SettingsService {
+export class SettingsService implements OnApplicationBootstrap {
   constructor(@Inject(PRISMA) private readonly prisma: PrismaClient) {}
+
+  async onApplicationBootstrap() {
+    const defaults = [
+      { key: 'default_payment_provider', value: 'cod' },
+      { key: 'default_payment_instructions', value: '' },
+      { key: 'default_payment_link_template', value: '' },
+      { key: 'default_payment_label', value: 'Assisted Payment' },
+    ];
+
+    for (const { key, value } of defaults) {
+      await this.prisma.setting.upsert({
+        where: { key },
+        update: {}, // Don't overwrite if already exists
+        create: { key, value },
+      });
+    }
+  }
 
   async get(key: string): Promise<string | null> {
     const row = await this.prisma.setting.findUnique({ where: { key } });
