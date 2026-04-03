@@ -120,6 +120,14 @@ export class RetailersController {
     return this.registry.findById(id);
   }
 
+  @Get(':id/audit-logs')
+  getAuditLogs(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.registry.getAuditLogs(id, limit);
+  }
+
   /** PATCH /api/retailers/:id — verify, update URL, toggle active, etc. */
   @Patch(':id')
   update(

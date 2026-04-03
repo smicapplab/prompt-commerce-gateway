@@ -132,7 +132,7 @@ export class WebhookController {
     }
 
     // Notify Telegram user about the payment status change (deduplicated)
-    if ((event.status === 'paid' || event.status === 'failed') && payment.status !== event.status) {
+    if ((event.status === 'paid' || event.status === 'failed') && event.previousStatus !== event.status) {
       await this.telegramService.notifyPaymentStatus({
         buyerRef:    payment.buyerRef,
         storeSlug:   payment.storeSlug,

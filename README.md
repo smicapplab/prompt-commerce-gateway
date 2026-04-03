@@ -85,15 +85,16 @@ The gateway parses natural language queries into structured filters (price, stoc
 
 - Cart items are stored in PostgreSQL (`carts` table) — survive gateway restarts.
 - Per-user, per-store scoping: `@@unique([userId, storeSlug, productId])`.
-- Injected as `CartService` into `TelegramService` — all operations are async and transactional.
-- `add()` uses an upsert with quantity increment, so re-adding an item increases quantity rather than duplicating it.
+- Injected as `CartService` into `TelegramService` — all operations are async, transactional, and validated against the live product catalog.
+- `add()` uses an upsert with quantity increment, so re-adding an item increases quantity rather than duplicating it. Quantity is clamped (1-99) for safety.
 
 ### Checkout & Order Flow
 
 - **Multi-step checkout in-bot** — customers provide name, email, and delivery address through a guided conversation.
 - **Input validation** — name (1–100 chars), email (RFC-compliant regex + 254-char max), address (1–300 chars).
-- **Order rate limiting** — one order per 30 seconds per user to prevent double-submissions.
-- **Seller notifications** — after every successful order, the seller receives a Telegram message (if `telegramNotifyChatId` is configured) with item breakdown, total, and buyer info.
+- **Order rate limiting** — atomic one-order-per-30-seconds guard per user to prevent double-submissions and race conditions.
+- **Seller notifications** — after every successful order, the seller receives a Telegram message (if `telegramNotifyChatId` is configured) with item breakdown, total, and buyer info. Failures are logged to the admin Audit Log.
+- **Robust Order Tracking** — gateway uses structured JSON responses from the seller MCP for reliable order ID extraction.
 - Orders are created on the seller via the MCP `create_order` tool, so all order data lives in the seller's SQLite.
 
 ### Payment Integration (Strategy Pattern)
@@ -102,23 +103,26 @@ Supports multiple payment providers via a pluggable adapter:
 
 | Provider | Method |
 |----------|--------|
-| **Mock** | Instant `paid` status — for testing and demos |
-| **PayMongo** | GCash, Maya, GrabPay (redirect) |
+| **Mock** | Instant `paid` status with token-based CSRF protection for risk-free testing |
+| **PayMongo** | GCash, Maya, GrabPay (redirect) with link-specific webhook handling |
 | **Stripe** | Hosted Checkout Sessions (cards, worldwide) |
 
 Payment config is pushed automatically from the seller admin on every save — no manual gateway configuration needed.
 
-**Webhook security:** All incoming payment webhooks (`POST /webhooks/payment/:slug`) are HMAC-verified. Raw request body is preserved in `main.ts` via a custom `verify` callback for signature checking.
+**Webhook security:** All incoming payment webhooks (`POST /webhooks/payment/:slug`) are HMAC-verified. Raw request body is preserved in `main.ts` via a custom `verify` callback for signature checking. Payment status updates are deduplicated to prevent redundant Telegram notifications.
 
 **Order lifecycle:** `pending` → `paid` → `picking` → `packing` → `ready_for_pickup` → `in_transit` → `delivered` (plus `cancelled` / `refunded`).
 
-### AI Chat (per store)
+### AI Chat & Conversation Mirroring
 
 Each store can enable an AI assistant for product discovery and recommendations:
 
 - **Claude** — `@anthropic-ai/sdk` with tool-use agentic loop (up to 5 rounds)
 - **Gemini** — `@google/generative-ai` with function declarations
 - **OpenAI** — `openai` SDK with function calling
+- **Conversation Mirroring** — All Telegram/Web chats are mirrored to the seller's SQLite in real-time with automatic retries on failure.
+- **Human Handover** — Seamlessly switch from AI to human agent; the gateway synchronizes mode changes across all channels.
+- **Security Hardening** — XSS protection via HTML escaping for sender names and store names in all customer-facing templates.
 - **Custom system prompt** — per-store persona pushed from seller admin and stored on the `Retailer` row.
 - **Model override** — any model string can be specified (e.g. `gemini-1.5-flash`, `claude-opus-4-5`).
 

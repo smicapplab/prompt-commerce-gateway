@@ -52,6 +52,7 @@ export class ConversationService {
       buyer_ref: buyerRef,
       buyer_name: buyerName,
       channel: 'telegram',
+      gateway_id: conv.id,
     }).catch(err => this.logger.error(`Failed to mirror conversation to seller: ${err.message}`));
 
     return conv;
@@ -76,16 +77,15 @@ export class ConversationService {
       },
     });
   }
-
   /** Update conversation mode (ai -> human) and assigned agent */
-  async setMode(id: number, mode: 'ai' | 'human' | 'closed', assignedTo?: string) {
+  async setMode(id: number, mode: 'ai' | 'human' | 'closed', assignedTo?: string, skipMirror = false, skipNotification = false) {
     const conv = await this.prisma.conversation.update({
       where: { id },
       data: { mode, assignedTo: assignedTo || null },
     });
 
-    // Notify seller via Telegram if this is a handover to human
-    if (mode === 'human') {
+    // Notify seller via Telegram if this is a handover to human (triggered by AI or Admin, not the seller itself)
+    if (mode === 'human' && !skipNotification) {
       try {
         const retailer = await this.registry.findBySlug(conv.storeSlug);
         if (retailer.telegramNotifyChatId) {
@@ -100,11 +100,23 @@ export class ConversationService {
       }
     }
 
-    // Mirror to seller app
-    this.mirrorToSeller(conv.storeSlug, 'PATCH', `/api/conversations/${id}`, {
-      mode,
-      assigned_to: assignedTo,
-    }).catch(err => this.logger.error(`Failed to mirror mode change to seller: ${err.message}`));
+    if (skipMirror) return conv;
+
+  // Mirror to seller app
+  this.mirrorToSeller(conv.storeSlug, 'POST', `/api/conversations/lookup`, {
+...
+      buyer_ref: conv.buyerRef,
+      channel: conv.channel
+    })
+    .then(async (sellerConv: any) => {
+      if (sellerConv?.id) {
+        return this.mirrorToSeller(conv.storeSlug, 'PATCH', `/api/conversations/${sellerConv.id}`, {
+          mode,
+          assigned_to: assignedTo,
+        });
+      }
+    })
+    .catch(err => this.logger.error(`Failed to mirror mode change to seller: ${err.message}`));
 
     return conv;
   }
@@ -115,15 +127,16 @@ export class ConversationService {
     if (!conv) throw new Error('Conversation not found');
 
     // 1. Deliver to Telegram
-    const prefix = senderName ? `[${senderName}]: ` : '';
-    await this.telegram.sendMessage(conv.buyerRef, `${prefix}${body}`);
+    const escName = (senderName || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const prefix = escName ? `[${escName}]: ` : '';
+    await this.telegram.sendMessage(conv.buyerRef, `${prefix}${body}`, { parse_mode: 'HTML' });
 
     // 2. Log and mirror (this handles both PostgreSQL and SQLite)
     return this.logMessage(conversationId, conv.storeSlug, 'human', body, senderName);
   }
 
   /** Log a message to gateway (PostgreSQL) and mirror to seller (SQLite) */
-  async logMessage(conversationId: number, storeSlug: string, senderType: SenderType, body: string, senderName?: string) {
+  async logMessage(conversationId: number, storeSlug: string, senderType: SenderType, body: string, senderName?: string, skipMirror = false) {
     const msg = await this.prisma.message.create({
       data: {
         conversationId,
@@ -132,6 +145,8 @@ export class ConversationService {
         body,
       },
     });
+
+    if (skipMirror) return msg;
 
     // Mirror to seller app (fire-and-forget)
     // We need the seller-side conversation ID. For simplicity, we use buyer_ref to find it on their side.
@@ -157,32 +172,37 @@ export class ConversationService {
   }
 
   /** Internal helper to call seller app with gateway platform key */
-  private async mirrorToSeller(slug: string, method: string, path: string, body: any) {
-    try {
-      const retailer = await this.registry.findBySlug(slug);
-      if (!retailer.platformKey) {
-        throw new Error(`No platform key for retailer ${slug}`);
+  private async mirrorToSeller(slug: string, method: string, path: string, body: any, retries = 2) {
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const retailer = await this.registry.findBySlug(slug);
+        if (!retailer.platformKey) {
+          throw new Error(`No platform key for retailer ${slug}`);
+        }
+
+        const url = `${retailer.mcpServerUrl}${path}?store=${slug}`;
+        const res = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'x-gateway-key': retailer.platformKey.key,
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.text();
+          throw new Error(`Seller app returned ${res.status}: ${errBody}`);
+        }
+
+        return await res.json();
+      } catch (err: any) {
+        if (i === retries) {
+          throw err;
+        }
+        // Wait before retry
+        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
       }
-
-      const url = `${retailer.mcpServerUrl}${path}?store=${slug}`;
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'x-gateway-key': retailer.platformKey.key,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const errBody = await res.text();
-        throw new Error(`Seller app returned ${res.status}: ${errBody}`);
-      }
-
-      return res.json();
-    } catch (err) {
-      // Re-throw so the caller can log it
-      throw err;
     }
   }
 }

@@ -336,7 +336,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
         // c:<slug>:<catId> — products in category
         if (data.startsWith('c:')) {
-          const [, slug, catId] = data.split(':');
+          const parts = data.split(':');
+          if (parts.length < 3) return;
+          const [, slug, catId] = parts;
           await this.sendProducts(ctx, slug, parseInt(catId), 0);
           return;
         }
@@ -344,6 +346,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         // pg:<slug>:<catId>:<page> — paginate products
         if (data.startsWith('pg:')) {
           const parts = data.split(':');
+          if (parts.length < 4) return;
           const slug = parts[1];
           const catId = parts[2];
           const page  = parseInt(parts[3]);
@@ -353,28 +356,38 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
         // p:<slug>:<productId> — product detail
         if (data.startsWith('p:')) {
-          const [, slug, productId] = data.split(':');
+          const parts = data.split(':');
+          if (parts.length < 3) return;
+          const [, slug, productId] = parts;
           await this.sendProductDetail(ctx, slug, parseInt(productId));
           return;
         }
 
         // a:<slug>:<productId>:<qty> — add to cart
         if (data.startsWith('a:')) {
-          const [, slug, productId, qtyStr] = data.split(':');
-          await this.addToCart(ctx, userId, slug, parseInt(productId), qtyStr ? parseInt(qtyStr) : 1);
+          const parts = data.split(':');
+          if (parts.length < 3) return;
+          const [, slug, productId, qtyStr] = parts;
+          // Guard quantity between 1 and 99 (Finding #11)
+          const qty = Math.max(1, Math.min(99, qtyStr ? parseInt(qtyStr) : 1));
+          await this.addToCart(ctx, userId, slug, parseInt(productId), qty);
           return;
         }
 
         // qty:<slug>:<productId> — ask for quantity
         if (data.startsWith('qty:')) {
-          const [, slug, productId] = data.split(':');
+          const parts = data.split(':');
+          if (parts.length < 3) return;
+          const [, slug, productId] = parts;
           await ctx.editMessageReplyMarkup({ reply_markup: quantityKeyboard(slug, parseInt(productId)) });
           return;
         }
 
         // r:<slug>:<productId> — remove from cart
         if (data.startsWith('r:')) {
-          const [, slug, productId] = data.split(':');
+          const parts = data.split(':');
+          if (parts.length < 3) return;
+          const [, slug, productId] = parts;
           await this.cartService.remove(userId, slug, parseInt(productId));
           await this.sendCart(ctx, userId, slug);
           return;
@@ -900,25 +913,55 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // ── Rate limiting: one order per 30 seconds per user (restart-safe) ─────
-    const user = await this.prisma.telegramUser.findUnique({ where: { id: userId } });
-    const lastAt = user?.lastOrderAt?.getTime() || 0;
-    const now = Date.now();
+    // ── Rate limiting: one order per 30 seconds per user (atomic) ──────────
+    const thirtySecsAgo = new Date(Date.now() - 30_000);
+    const updated = await this.prisma.telegramUser.updateMany({
+      where: {
+        id: userId,
+        OR: [
+          { lastOrderAt: null },
+          { lastOrderAt: { lt: thirtySecsAgo } }
+        ]
+      },
+      data: { lastOrderAt: new Date() }
+    });
 
-    if (now - lastAt < 30_000) {
-      const waitSec = Math.ceil((30_000 - (now - lastAt)) / 1000);
-      await ctx.answerCallbackQuery(`⏳ Please wait ${waitSec}s before placing another order.`);
-      return;
+    if (updated.count === 0) {
+      const user = await this.prisma.telegramUser.findUnique({ where: { id: userId } });
+      if (user) {
+        const lastAt = user.lastOrderAt?.getTime() || 0;
+        const waitSec = Math.ceil((30_000 - (Date.now() - lastAt)) / 1000);
+        await ctx.answerCallbackQuery(`⏳ Please wait ${waitSec}s before placing another order.`);
+        return;
+      } else {
+        // First order for this user — handle race condition (Issue #1)
+        try {
+          await this.prisma.telegramUser.create({
+            data: { id: userId, lastOrderAt: new Date() }
+          });
+        } catch (e: any) {
+          // If another request created it simultaneously, treat it as a rate limit hit
+          if (e.code === 'P2002') {
+             await ctx.answerCallbackQuery(`⏳ Please wait a moment before placing another order.`);
+             return;
+          }
+          throw e;
+        }
+      }
     }
 
     const items = await this.cartService.get(userId, slug);
+    if (items.length === 0) {
+      await ctx.answerCallbackQuery('⚠️ Your cart is empty.');
+      return;
+    }
     const total = await this.cartService.total(userId, slug);
 
-    const retailer = await this.getRetailer(slug);
-    const notes = `Name: ${state.name}, Email: ${state.email}, Address: ${state.address}`;
-    const orderItems = items.map(i => ({ product_id: i.productId, quantity: i.quantity }));
-
     try {
+      const retailer = await this.getRetailer(slug);
+      const notes = `Name: ${state.name}, Email: ${state.email}, Address: ${state.address}`;
+      const orderItems = items.map(i => ({ product_id: i.productId, quantity: i.quantity }));
+
       try {
         await ctx.editMessageText('⏳ Processing your order... Please wait.', { parse_mode: 'HTML' });
       } catch (e: any) {
@@ -936,9 +979,32 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         confirm: true,
       }) as any;
 
-      const resultText: string = result?.content?.[0]?.text ?? '';
-      const match = resultText.match(/Order #(\d+)/);
-      const orderId = match ? parseInt(match[1]) : 0;
+      const content = result?.content || [];
+      let orderId = 0;
+
+      // 1. Try to parse from JSON content (reliable)
+      for (const item of content) {
+        if (item.type === 'text' && item.text?.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(item.text);
+            if (parsed.order_id) {
+              orderId = parsed.order_id;
+              break;
+            }
+          } catch (e) { /* not JSON */ }
+        }
+      }
+
+      // 2. Fallback to regex (fragile)
+      if (!orderId) {
+        const resultText: string = result?.content?.[0]?.text ?? '';
+        const match = resultText.match(/Order #(\d+)/);
+        if (match) orderId = parseInt(match[1]);
+      }
+
+      if (!orderId) {
+        throw new Error(`Failed to parse order ID from seller response: ${JSON.stringify(result)}`);
+      }
 
       await this.cartService.clear(userId, slug);
       this.checkoutSessions.delete(userId);
@@ -964,7 +1030,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               `<b>Email:</b> ${esc(state.email ?? '')}\n` +
               `<b>Address:</b> ${esc(state.address ?? '')}`,
               { parse_mode: 'HTML' },
-            ).catch((e: any) => this.logger.error(`Seller notify failed for ${slug}: ${e}`));
+            ).catch(async (e: any) => {
+              this.logger.error(`Seller notify failed for ${slug}: ${e}`);
+              // Log to AuditLog for admin visibility
+              await this.prisma.auditLog.create({
+                data: {
+                  retailerId: fullRetailer.id,
+                  event: 'seller_notification_failed',
+                  meta: { orderId, error: String(e), chatId: fullRetailer.telegramNotifyChatId }
+                }
+              }).catch(() => {});
+            });
           }
         } catch (e) {
           this.logger.warn(`Could not load retailer for seller notify (${slug}): ${e}`);
@@ -1017,7 +1093,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         } catch (payErr) {
           this.logger.error(`Payment initiation failed for order ${orderId}: ${payErr}`);
-          // Fall through — show order confirmation without payment
+          await ctx.editMessageText(
+            orderConfirmation(orderId, items, total) + 
+            '\n\n⚠️ <b>Payment initiation failed.</b> Your order has been placed, but we couldn\'t process the payment online. Please contact the store to arrange payment.',
+            { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+          );
+          return;
         }
       }
 
@@ -1028,6 +1109,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     } catch (err) {
       this.logger.error(`Order creation failed: ${err}`);
+      this.checkoutSessions.delete(userId);
       try {
         await ctx.editMessageText(
           '❌ Sorry, there was an error placing your order. Please try again.',

@@ -130,7 +130,15 @@ export class PayMongoGateway implements PaymentGateway {
       const event = body as any;
       const eventType: string = event?.data?.attributes?.type ?? '';
       const resource = event?.data?.attributes?.data;
-      const referenceId: string = resource?.id ?? '';
+      
+      // PayMongo Link reference handling (Finding #15)
+      // link.payment.paid returns a payment resource, where link_id is the reference we stored.
+      let referenceId: string = '';
+      if (eventType.startsWith('link.')) {
+        referenceId = resource?.attributes?.link_id ?? resource?.id ?? '';
+      } else {
+        referenceId = resource?.id ?? '';
+      }
 
       let status: PaymentStatus;
       if (eventType.includes('paid') || eventType.includes('payment.paid')) {

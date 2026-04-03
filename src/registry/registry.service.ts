@@ -72,6 +72,14 @@ export class RegistryService {
     return retailer;
   }
 
+  async getAuditLogs(retailerId: number, limit = 50) {
+    return this.prisma.auditLog.findMany({
+      where: { retailerId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
   /** Public registration — creates retailer in unverified state, no key yet. */
   async register(dto: RegisterRetailerDto): Promise<Retailer> {
     const existingSlug = await this.prisma.retailer.findUnique({

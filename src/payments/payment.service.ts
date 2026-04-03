@@ -132,7 +132,7 @@ export class PaymentService {
     storeSlug: string,
     body:      unknown,
     signature: string,
-  ): Promise<WebhookEvent | null> {
+  ): Promise<(WebhookEvent & { previousStatus?: string }) | null> {
     const retailer = await this.prisma.retailer.findUnique({
       where: { slug: storeSlug },
     });
@@ -146,18 +146,26 @@ export class PaymentService {
     if (!event) return null;
 
     // Update the Payment record's status
+    let previousStatus: string | undefined;
     try {
-      await this.prisma.payment.update({
+      const payment = await this.prisma.payment.findUnique({
         where: { referenceId: event.referenceId },
-        data:  { status: event.status },
       });
+      previousStatus = payment?.status;
+
+      if (payment && payment.status !== event.status) {
+        await this.prisma.payment.update({
+          where: { referenceId: event.referenceId },
+          data:  { status: event.status },
+        });
+      }
     } catch (err) {
       this.logger.error(
         `Failed to update payment ${event.referenceId}: ${(err as Error).message}`,
       );
     }
 
-    return event;
+    return { ...event, previousStatus };
   }
 
   // ── Lookup ─────────────────────────────────────────────────────────────────

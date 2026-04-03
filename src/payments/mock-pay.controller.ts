@@ -20,6 +20,7 @@ import { PRISMA } from '../prisma/prisma.module';
 @Controller('mock-pay')
 export class MockPayController {
   private readonly logger = new Logger(MockPayController.name);
+  private readonly mockTokens = new Map<string, string>();
 
   constructor(
     @Inject(PRISMA) private readonly prisma: PrismaClient,
@@ -40,11 +41,15 @@ export class MockPayController {
       return res.redirect('/payment/cancel');
     }
 
+    const token = Math.random().toString(36).substring(2, 15);
+    this.mockTokens.set(referenceId, token);
+
     const retailer = await this.prisma.retailer.findUnique({
       where: { slug: payment.storeSlug },
     });
 
     const storeName = retailer?.name || payment.storeSlug;
+    const escStoreName = (storeName || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     const amountFormatted = new Intl.NumberFormat('en-PH', {
       style: 'currency',
       currency: payment.currency,
@@ -88,15 +93,15 @@ export class MockPayController {
                      margin: 0 auto; }
           @keyframes spin { to { transform: rotate(360deg); } }
         </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="banner">🧪 TEST MODE — No real payment will be made</div>
-          <div class="header">
-            <p class="store-name">${storeName}</p>
-            <p class="amount">${amountFormatted}</p>
-            <p class="description">Order #${payment.orderId}</p>
-          </div>
+      <title>Mock Checkout — ${escStoreName}</title>
+      ...
+      <div class="container">
+        <div class="banner">🧪 TEST MODE — No real payment will be made</div>
+        <div class="header">
+          <p class="store-name">${escStoreName}</p>
+          <p class="amount">${amountFormatted}</p>
+          <p class="description">Order #${payment.orderId}</p>
+        </div>
           <div class="form">
             <div class="field">
               <label>Card Number</label>
@@ -138,7 +143,7 @@ export class MockPayController {
             await new Promise(r => setTimeout(r, 1500));
 
             try {
-              const res = await fetch('/mock-pay/confirm?ref=${referenceId}', { method: 'POST' });
+              const res = await fetch('/mock-pay/confirm?ref=${referenceId}&token=${token}', { method: 'POST' });
               if (res.redirected) {
                 window.location.href = res.url;
               } else {
@@ -166,10 +171,21 @@ export class MockPayController {
   }
 
   @Post('confirm')
-  async confirmPayment(@Query('ref') referenceId: string, @Res() res: Response) {
+  async confirmPayment(
+    @Query('ref') referenceId: string, 
+    @Query('token') token: string,
+    @Res() res: Response
+  ) {
     if (process.env.NODE_ENV === 'production' && process.env.ENABLE_MOCK_PAYMENT !== 'true') {
       throw new NotFoundException();
     }
+
+    const expectedToken = this.mockTokens.get(referenceId);
+    if (!expectedToken || expectedToken !== token) {
+      throw new UnauthorizedException('Invalid or expired CSRF token');
+    }
+    this.mockTokens.delete(referenceId);
+
     const payment = await this.paymentService.findByReference(referenceId);
     if (!payment) throw new NotFoundException('Payment not found');
     if (payment.status !== 'pending') {
@@ -190,14 +206,16 @@ export class MockPayController {
       return res.status(400).json({ error: 'Payment verification failed' });
     }
 
-    // Notify Telegram
-    await this.telegramService.notifyPaymentStatus({
-      buyerRef:    payment.buyerRef,
-      storeSlug:   payment.storeSlug,
-      orderId:     payment.orderId,
-      status:      'paid',
-      referenceId: payment.referenceId,
-    });
+    // Notify Telegram (only if it wasn't already paid)
+    if (event.previousStatus !== 'paid') {
+      await this.telegramService.notifyPaymentStatus({
+        buyerRef:    payment.buyerRef,
+        storeSlug:   payment.storeSlug,
+        orderId:     payment.orderId,
+        status:      'paid',
+        referenceId: payment.referenceId,
+      });
+    }
 
     return res.json({ redirectUrl: payment.successUrl || '/payment/success' });
   }

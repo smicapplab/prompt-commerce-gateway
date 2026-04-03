@@ -86,38 +86,42 @@ export class CartService {
    * Returns a summary of changes if any prices or stock statuses changed.
    */
   async validateCartPrices(userId: string, storeSlug: string): Promise<{ changed: boolean; oldTotal: number; newTotal: number }> {
-    const items = await this.prisma.cart.findMany({
-      where: { userId, storeSlug },
-    });
-
-    let changed = false;
-    let oldTotal = 0;
-    let newTotal = 0;
-
-    for (const item of items) {
-      oldTotal += item.price * item.quantity;
-      const product = await this.prisma.cachedProduct.findUnique({
-        where: { storeSlug_sellerId: { storeSlug, sellerId: item.productId } },
+    return this.prisma.$transaction(async (tx) => {
+      const items = await tx.cart.findMany({
+        where: { userId, storeSlug },
       });
 
-      if (!product || !product.active || product.price !== item.price) {
-        changed = true;
-        if (!product || !product.active) {
-          // Product no longer available — remove from cart
-          await this.remove(userId, storeSlug, item.productId);
-        } else {
-          // Update price in cart
-          await this.prisma.cart.update({
-            where: { id: item.id },
-            data: { price: product.price ?? 0 },
-          });
-          newTotal += (product.price ?? 0) * item.quantity;
-        }
-      } else {
-        newTotal += item.price * item.quantity;
-      }
-    }
+      let changed = false;
+      let oldTotal = 0;
+      let newTotal = 0;
 
-    return { changed, oldTotal, newTotal };
+      for (const item of items) {
+        oldTotal += item.price * item.quantity;
+        const product = await tx.cachedProduct.findUnique({
+          where: { storeSlug_sellerId: { storeSlug, sellerId: item.productId } },
+        });
+
+        if (!product || !product.active || product.price !== item.price) {
+          changed = true;
+          if (!product || !product.active) {
+            // Product no longer available — remove from cart
+            await tx.cart.deleteMany({
+              where: { userId, storeSlug, productId: item.productId },
+            });
+          } else {
+            // Update price in cart
+            await tx.cart.update({
+              where: { id: item.id },
+              data: { price: product.price ?? 0 },
+            });
+            newTotal += (product.price ?? 0) * item.quantity;
+          }
+        } else {
+          newTotal += item.price * item.quantity;
+        }
+      }
+
+      return { changed, oldTotal, newTotal };
+    });
   }
 }

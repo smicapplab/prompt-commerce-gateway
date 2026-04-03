@@ -85,13 +85,33 @@ export class ChatController {
     }
 
     // 2. Deliver message via Telegram
-    const prefix = body.senderName ? `[${body.senderName}]: ` : '';
-    await this.telegram.sendMessage(conv.buyerRef, `${prefix}${body.body}`);
+    const escName = (body.senderName || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const prefix = escName ? `[${escName}]: ` : '';
+    await this.telegram.sendMessage(conv.buyerRef, `${prefix}${body.body}`, { parse_mode: 'HTML' });
 
-    // 3. Log message to gateway DB
-    await this.conversation.logMessage(conv.id, slug, 'human', body.body, body.senderName);
+    // 3. Log message to gateway DB (skip mirroring back to seller since it originated from them)
+    await this.conversation.logMessage(conv.id, slug, 'human', body.body, body.senderName, true);
 
     return { success: true };
+  }
+
+  @Post('stores/:slug/conversations/:id/mode')
+  async updateMode(
+    @Param('slug') slug: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Headers('x-gateway-key') platformKey: string,
+    @Body() body: { mode: 'ai' | 'human' | 'closed'; assignedTo?: string }
+  ) {
+    await this.validateKey(slug, platformKey);
+    const conv = await this.conversation.findById(id);
+    if (!conv || conv.storeSlug !== slug) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    // We use skipMirror=true logic here implicitly by calling a modified setMode or just direct update
+    // Actually, setMode mirrors back to seller. If the seller is the one calling this, they already have the update.
+    // So we need a setMode version that can skip mirroring and notification.
+    return this.conversation.setMode(id, body.mode, body.assignedTo, true, true);
   }
 
   private async validateKey(slug: string, platformKey: string) {
