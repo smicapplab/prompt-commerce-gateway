@@ -11,6 +11,7 @@ import OpenAI from 'openai';
 import { callRetailerTool, type RetailerTarget } from '../mcp/retailer-client';
 import { ConversationService } from '../chat/conversation.service';
 import { ChatService } from '../chat/chat.service';
+import { SettingsService } from '../settings/settings.service';
 import { isSsrfSafe } from '../utils/ssrf';
 
 // ─── Store AI config (read from Retailer row) ────────────────────────────────
@@ -33,12 +34,6 @@ export interface ChatResult {
   text:      string;
   products?: ProductButton[];
 }
-
-const DEFAULT_MODELS: Record<string, string> = {
-  claude: 'claude-3-5-haiku-20241022',
-  gemini: 'gemini-1.5-flash',
-  openai: 'gpt-4o-mini',
-};
 
 // ─── Tool definitions ────────────────────────────────────────────────────────
 const TOOL_SPECS = [
@@ -144,7 +139,21 @@ export class AiChatService {
     private readonly catalog: CatalogService,
     private readonly conversationService: ConversationService,
     private readonly chatService: ChatService,
+    private readonly settings: SettingsService,
   ) {}
+
+  private async getDefaultModel(provider: 'claude' | 'gemini' | 'openai'): Promise<string> {
+    const key = `default_ai_model_${provider}`;
+    const saved = await this.settings.get(key);
+    if (saved) return saved;
+
+    const fallbacks: Record<string, string> = {
+      claude: 'claude-3-5-haiku-20241022',
+      gemini: 'gemini-1.5-flash',
+      openai: 'gpt-4o-mini',
+    };
+    return fallbacks[provider];
+  }
 
   clearHistory(userId: string, storeSlug: string): void {
     // History is now in DB
@@ -204,7 +213,7 @@ export class AiChatService {
     history: Anthropic.MessageParam[] = [],
   ): Promise<ChatResult> {
     const client = new Anthropic({ apiKey: config.apiKey });
-    const model  = config.model ?? DEFAULT_MODELS.claude;
+    const model  = config.model || (await this.getDefaultModel('claude'));
 
     const system = config.systemPrompt?.trim() ||
       `You are a friendly shopping assistant for "${storeName}". ` +
@@ -277,8 +286,9 @@ export class AiChatService {
     history: Anthropic.MessageParam[] = [],
   ): Promise<ChatResult> {
     const genAI = new GoogleGenerativeAI(config.apiKey);
+    const modelName = config.model || (await this.getDefaultModel('gemini'));
     const model = genAI.getGenerativeModel({
-      model: config.model ?? DEFAULT_MODELS.gemini,
+      model: modelName,
       systemInstruction: config.systemPrompt?.trim() ||
         `You are a friendly shopping assistant for "${storeName}". ` +
         `Help customers find products, answer questions about pricing, stock, and promotions. ` +
@@ -359,7 +369,7 @@ export class AiChatService {
     history: Anthropic.MessageParam[] = [],
   ): Promise<ChatResult> {
     const client = new OpenAI({ apiKey: config.apiKey });
-    const model  = config.model ?? DEFAULT_MODELS.openai;
+    const model  = config.model || (await this.getDefaultModel('openai'));
     const deadline = Date.now() + 30_000;
 
     const system = config.systemPrompt?.trim() ||

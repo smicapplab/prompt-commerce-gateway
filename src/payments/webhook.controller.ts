@@ -85,6 +85,25 @@ export class WebhookController {
     if (!valid) throw new UnauthorizedException('Invalid gateway key.');
   }
 
+  // ── Rate Limiting (In-memory) ──────────────────────────────────────────────
+  private readonly rateLimits = new Map<string, { count: number; resetAt: number }>();
+
+  private isRateLimited(ip: string): boolean {
+    const now = Date.now();
+    const limit = 10; // requests
+    const window = 60000; // 1 minute
+
+    let record = this.rateLimits.get(ip);
+    if (!record || now > record.resetAt) {
+      record = { count: 0, resetAt: now + window };
+    }
+
+    record.count++;
+    this.rateLimits.set(ip, record);
+
+    return record.count > limit;
+  }
+
   // ── Telegram webhook ───────────────────────────────────────────────────────
 
   @Post('webhooks/telegram')
@@ -112,6 +131,19 @@ export class WebhookController {
     @Headers('paymongo-signature') paymongoSig?: string,
     @Headers('stripe-signature') stripeSig?: string,
   ) {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    if (this.isRateLimited(ip)) {
+      this.logger.warn(`Webhook rate limit hit for IP ${ip} (slug: ${slug})`);
+      return { received: false, error: 'Too many requests' }; 
+    }
+
+    // L4: Ensure Content-Type is application/json
+    const contentType = req.headers['content-type'] || '';
+    if (!contentType.includes('application/json')) {
+      this.logger.warn(`Webhook for ${slug} rejected: Invalid Content-Type (${contentType})`);
+      return { received: false, error: 'Invalid Content-Type' };
+    }
+
     const signature = paymongoSig ?? stripeSig ?? '';
     // Use raw body for signature verification; fall back to parsed body
     const body = req.rawBody ? req.rawBody.toString('utf8') : req.body;
@@ -132,7 +164,8 @@ export class WebhookController {
     }
 
     // Notify Telegram user about the payment status change (deduplicated)
-    if ((event.status === 'paid' || event.status === 'failed') && event.previousStatus !== event.status) {
+    // M3: Double-check status change strictly. previousStatus is from the Payment record BEFORE the update.
+    if (event.previousStatus === 'pending' && (event.status === 'paid' || event.status === 'failed')) {
       await this.telegramService.notifyPaymentStatus({
         buyerRef:    payment.buyerRef,
         storeSlug:   payment.storeSlug,

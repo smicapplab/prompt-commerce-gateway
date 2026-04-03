@@ -50,6 +50,7 @@ export class StripeGateway implements PaymentGateway {
         Authorization: `Bearer ${order.apiKey}`,
       },
       body: params.toString(),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!res.ok) {

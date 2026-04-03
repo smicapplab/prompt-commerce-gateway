@@ -66,6 +66,7 @@ export class PayMongoGateway implements PaymentGateway {
         Authorization: `Basic ${Buffer.from(order.apiKey + ':').toString('base64')}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!res.ok) {

@@ -1,7 +1,7 @@
 // ─── Payment Service ──────────────────────────────────────────────────────────
 // Resolves the correct gateway adapter per store and manages Payment DB records.
 
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 import { SettingsService } from '../settings/settings.service';
@@ -90,10 +90,35 @@ export class PaymentService {
 
 
   async initiatePayment(input: InitiatePaymentInput): Promise<PaymentRecord> {
+    // M4: Validate payment amount
+    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+      throw new BadRequestException('Invalid payment amount');
+    }
+
     const retailer = await this.prisma.retailer.findUnique({
       where: { slug: input.storeSlug },
     });
     if (!retailer) throw new NotFoundException(`Store "${input.storeSlug}" not found`);
+
+    // M5: Idempotency - check if payment already exists for this order
+    const existing = await this.prisma.payment.findFirst({
+      where: { storeSlug: input.storeSlug, orderId: input.orderId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // If a pending or paid payment already exists, return it instead of creating a new one
+    if (existing && (existing.status === 'pending' || existing.status === 'paid')) {
+      this.logger.log(`Returning existing ${existing.status} payment for order ${input.orderId}`);
+      return {
+        id:          existing.id,
+        referenceId: existing.referenceId,
+        status:      existing.status,
+        paymentUrl:  existing.paymentUrl,
+        successUrl:  existing.successUrl,
+        cancelUrl:   existing.cancelUrl,
+        provider:    existing.provider,
+      };
+    }
 
     const adapter = await this.resolveAdapter(input.providerOverride ?? retailer.paymentProvider);
     const provider = adapter.name;

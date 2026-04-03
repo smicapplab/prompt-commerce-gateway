@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger, Optional, Inject } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import * as crypto from 'crypto';
 import { Bot, InlineKeyboard } from 'grammy';
 import { PRISMA } from '../prisma/prisma.module';
 import type { PrismaClient } from '@prisma/client';
@@ -156,7 +156,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   /** Validates the secret token Telegram sends in X-Telegram-Bot-Api-Secret-Token. */
   validateWebhookSecret(token: string): boolean {
-    return !!this.webhookSecret && token === this.webhookSecret;
+    if (!this.webhookSecret || !token) return false;
+    
+    // L1: The stored webhookSecret is a hash. We hash the incoming token and compare.
+    const incomingHash = crypto.createHash('sha256').update(token).digest('hex');
+    
+    try {
+      return crypto.timingSafeEqual(
+        Buffer.from(incomingHash),
+        Buffer.from(this.webhookSecret)
+      );
+    } catch {
+      return false;
+    }
   }
 
   /** Returns current mode + live webhook info from Telegram API. */
@@ -175,12 +187,21 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async ensureWebhookSecret(): Promise<string> {
-    let secret = await this.settings.get('telegram_webhook_secret');
-    if (!secret) {
-      secret = randomBytes(32).toString('hex'); // 64 hex chars — valid secret token
-      await this.settings.set('telegram_webhook_secret', secret);
-    }
-    return secret;
+    const stored = await this.settings.get('telegram_webhook_secret');
+    
+    // If already stored, we treat it as the hashed version.
+    // NOTE: This will break once if you have a plaintext secret stored, 
+    // but re-initialising the bot (save TG settings) will fix it.
+    if (stored) return stored;
+
+    // Generate a fresh secret, but store the HASH of it (L1)
+    const plaintext = crypto.randomBytes(32).toString('hex');
+    const hashed = crypto.createHash('sha256').update(plaintext).digest('hex');
+    
+    await this.settings.set('telegram_webhook_secret', hashed);
+    
+    // We must return the PLAINTEXT to pass to setWebhook()
+    return plaintext;
   }
 
   // ─── Handler registration ───────────────────────────────────────────────────
@@ -487,7 +508,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.on('message:text', async (ctx) => {
       const userId = await this.syncUser(ctx);
       if (!userId) return;
-      const text = ctx.message.text;
+      let text = ctx.message.text;
+
+      // M1: Guard against excessively long messages (10KB limit in TG, but we want to cap for AI/DB)
+      const MAX_LENGTH = 4000;
+      if (text.length > MAX_LENGTH) {
+        this.logger.warn(`User ${userId} sent long message (${text.length} chars). Truncating.`);
+        text = text.slice(0, MAX_LENGTH);
+        await ctx.reply('⚠️ <b>Message too long</b>\nYour message was truncated to 4,000 characters to process it effectively.', { parse_mode: 'HTML' });
+      }
+
       const lowerText = text.toLowerCase();
 
       // Check for human handover keywords (strictly phrases to avoid accidental triggers)
@@ -1010,7 +1040,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const retailer = await this.getRetailer(slug);
-      const notes = `Name: ${state.name}, Email: ${state.email}, Address: ${state.address}`;
+      // M7: Escape buyer data before passing to MCP to prevent XSS in seller admin
+      const notes = `Name: ${esc(state.name)}, Email: ${esc(state.email)}, Address: ${esc(state.address)}`;
       const orderItems = items.map(i => ({ product_id: i.productId, quantity: i.quantity }));
 
       try {

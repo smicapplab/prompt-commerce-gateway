@@ -36,6 +36,7 @@ export function mountGatewayMcp(
       throw new Error(`Store "${slug}" has no active platform key.`);
     }
     return {
+      id: retailer.id,
       slug: retailer.slug,
       mcpServerUrl: retailer.mcpServerUrl,
       platformKey: retailer.platformKey.key,
@@ -56,6 +57,21 @@ export function mountGatewayMcp(
   // ── Auth error helper ─────────────────────────────────────────────────────
   function authError(msg: string) {
     return { content: [{ type: 'text' as const, text: `🔒 ${msg}` }], isError: true };
+  }
+
+  // ── Helper: execute tool and log audit event ──────────────────────────────
+  async function executeAndLog(retailer: any, toolName: string, args: any) {
+    const result = await callRetailerTool(retailer, toolName, args);
+    
+    // Only log if it's a "confirm" action (actual write) and not an error
+    if (args.confirm === true && !(result as any).isError) {
+      await registry.addAuditLog(retailer.id, `mcp:${toolName}`, {
+        args,
+        result: (result as any).content?.[0]?.text?.substring(0, 500),
+      });
+    }
+    
+    return result;
   }
 
   // ── Factory: create a fresh McpServer per connection ──────────────────────
@@ -214,8 +230,7 @@ export function mountGatewayMcp(
         if (!authorizedSlug) return authError('add_product requires authentication. Connect with your store\'s x-api-key header.');
         if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
-        const result = await callRetailerTool(retailer, 'add_product', args);
-        return result as never;
+        return await executeAndLog(retailer, 'add_product', args) as never;
       },
     );
 
@@ -241,8 +256,7 @@ export function mountGatewayMcp(
         if (!authorizedSlug) return authError('update_product requires authentication. Connect with your store\'s x-api-key header.');
         if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
-        const result = await callRetailerTool(retailer, 'update_product', args);
-        return result as never;
+        return await executeAndLog(retailer, 'update_product', args) as never;
       },
     );
 
@@ -261,8 +275,7 @@ export function mountGatewayMcp(
         if (!authorizedSlug) return authError('update_inventory requires authentication. Connect with your store\'s x-api-key header.');
         if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
-        const result = await callRetailerTool(retailer, 'update_inventory', args);
-        return result as never;
+        return await executeAndLog(retailer, 'update_inventory', args) as never;
       },
     );
 
@@ -279,8 +292,7 @@ export function mountGatewayMcp(
         if (!authorizedSlug) return authError('import_products requires authentication. Connect with your store\'s x-api-key header.');
         if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
-        const result = await callRetailerTool(retailer, 'import_products', args);
-        return result as never;
+        return await executeAndLog(retailer, 'import_products', args) as never;
       },
     );
 
@@ -298,8 +310,7 @@ export function mountGatewayMcp(
         if (!authorizedSlug) return authError('add_category requires authentication. Connect with your store\'s x-api-key header.');
         if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
-        const result = await callRetailerTool(retailer, 'add_category', args);
-        return result as never;
+        return await executeAndLog(retailer, 'add_category', args) as never;
       },
     );
 
@@ -319,8 +330,7 @@ export function mountGatewayMcp(
         if (!authorizedSlug) return authError('batch_add_categories requires authentication. Connect with your store\'s x-api-key header.');
         if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
-        const result = await callRetailerTool(retailer, 'batch_add_categories', args);
-        return result as never;
+        return await executeAndLog(retailer, 'batch_add_categories', args) as never;
       },
     );
 
@@ -339,8 +349,7 @@ export function mountGatewayMcp(
         if (!authorizedSlug) return authError('update_category requires authentication. Connect with your store\'s x-api-key header.');
         if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
-        const result = await callRetailerTool(retailer, 'update_category', args);
-        return result as never;
+        return await executeAndLog(retailer, 'update_category', args) as never;
       },
     );
 
@@ -363,8 +372,7 @@ export function mountGatewayMcp(
         if (!authorizedSlug) return authError('add_promotion requires authentication. Connect with your store\'s x-api-key header.');
         if (authorizedSlug !== store) return authError(`Your key is authorized for "${authorizedSlug}", not "${store}".`);
         const retailer = await getActiveRetailer(store);
-        const result = await callRetailerTool(retailer, 'add_promotion', args);
-        return result as never;
+        return await executeAndLog(retailer, 'add_promotion', args) as never;
       },
     );
 

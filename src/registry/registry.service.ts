@@ -85,6 +85,16 @@ export class RegistryService {
     });
   }
 
+  async addAuditLog(retailerId: number, event: string, meta?: any) {
+    return this.prisma.auditLog.create({
+      data: {
+        retailerId,
+        event,
+        meta: meta ? JSON.parse(JSON.stringify(meta)) : undefined,
+      },
+    });
+  }
+
   /** Public registration — creates retailer in unverified state, no key yet. */
   async register(dto: RegisterRetailerDto): Promise<Retailer> {
     const existingSlug = await this.prisma.retailer.findUnique({
