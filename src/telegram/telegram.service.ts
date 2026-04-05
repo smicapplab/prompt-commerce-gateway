@@ -12,7 +12,7 @@ import { CartService } from './cart.service';
 import { ConversationService } from '../chat/conversation.service';
 import { PaymentService } from '../payments/payment.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
-         productListKeyboard, productDetailKeyboard, productDetailSearchKeyboard,
+         productListKeyboard, productDetailKeyboard, productDetailSearchKeyboard, productDetailAiKeyboard,
          cartKeyboard, emptyCartKeyboard, aiModeKeyboard, aiProductKeyboard,
          backKeyboard, quantityKeyboard } from './keyboards';
 import { esc, price, productDetail, cartSummary, orderConfirmation,
@@ -785,11 +785,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     // ── 4. Choose keyboard based on context ───────────────────────────────────
-    // If the user has an active search query, offer "Back to Search" instead of
-    // the generic category-list back button.
-    const keyboard = (userId && this.searchQueries.has(userId))
-      ? productDetailSearchKeyboard(slug, productId)
-      : productDetailKeyboard(slug, productId, 'all', 0);
+    // Priority: AI session > global search query > default category nav.
+    let keyboard;
+    if (userId && this.aiSessions.has(userId)) {
+      keyboard = productDetailAiKeyboard(slug, productId);
+    } else if (userId && this.searchQueries.has(userId)) {
+      keyboard = productDetailSearchKeyboard(slug, productId);
+    } else {
+      keyboard = productDetailKeyboard(slug, productId, 'all', 0);
+    }
 
     // ── 5. Edit the existing message (stays as text → all nav works) ──────────
     try {

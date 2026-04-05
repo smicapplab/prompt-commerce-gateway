@@ -99,6 +99,18 @@ export function productDetailSearchKeyboard(
     .text('🔍 Back to Search', 'srch:0');
 }
 
+// ─── Product detail (from AI chat context) ────────────────────────────────────
+// "Back to AI" re-enters the store's AI assistant.
+export function productDetailAiKeyboard(
+  slug: string,
+  productId: number,
+): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('🛒 Add to Cart', CB.qty(slug, productId)).row()
+    .text('🛍 View Cart', CB.cart(slug))
+    .text('🤖 Back to AI Chat', CB.ai(slug));
+}
+
 // ─── Quantity selection ───────────────────────────────────────────────────────
 export function quantityKeyboard(slug: string, productId: number): InlineKeyboard {
   return new InlineKeyboard()

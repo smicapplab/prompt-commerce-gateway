@@ -256,12 +256,14 @@ export class AiChatService {
         if (tool.name === 'search_products') {
           try {
             const parsed = JSON.parse(toolResult);
-            if (parsed.products?.length) {
-              capturedProducts = parsed.products.map((p: any) => ({
+            // Handle both: [{...}] array (live MCP) and { products: [...] } (cache)
+            const list: any[] = Array.isArray(parsed) ? parsed : (parsed.products ?? []);
+            if (list.length) {
+              capturedProducts = list.map((p: any) => ({
                 id: p.id, title: p.title, price: p.price ?? null,
               }));
             }
-          } catch { /* not JSON or no products field */ }
+          } catch { /* not JSON */ }
         }
         results.push({ type: 'tool_result', tool_use_id: tool.id, content: toolResult });
       }
@@ -333,8 +335,10 @@ export class AiChatService {
         if (p.functionCall!.name === 'search_products') {
           try {
             const parsed = JSON.parse(toolResult);
-            if (parsed.products?.length) {
-              capturedProducts = parsed.products.map((pr: any) => ({
+            // Handle both: [{...}] array (live MCP) and { products: [...] } (cache)
+            const list: any[] = Array.isArray(parsed) ? parsed : (parsed.products ?? []);
+            if (list.length) {
+              capturedProducts = list.map((pr: any) => ({
                 id: pr.id, title: pr.title, price: pr.price ?? null,
               }));
             }
@@ -429,8 +433,10 @@ export class AiChatService {
         if (fn.name === 'search_products') {
           try {
             const parsed = JSON.parse(result);
-            if (parsed.products?.length) {
-              capturedProducts = parsed.products.map((p: any) => ({
+            // Handle both: [{...}] array (live MCP) and { products: [...] } (cache)
+            const list: any[] = Array.isArray(parsed) ? parsed : (parsed.products ?? []);
+            if (list.length) {
+              capturedProducts = list.map((p: any) => ({
                 id: p.id, title: p.title, price: p.price ?? null,
               }));
             }
