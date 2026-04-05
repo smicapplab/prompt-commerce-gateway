@@ -343,7 +343,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           const slug = data.slice(3);
           this.aiSessions.delete(userId);
           const retailer = await this.registry.findBySlug(slug);
-          await ctx.editMessageText(storeMenuMessage(retailer.name), {
+          await this.safeEditText(ctx, storeMenuMessage(retailer.name), {
             parse_mode: 'HTML',
             reply_markup: storeMenuKeyboard(slug),
           });
@@ -463,7 +463,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           const slug = data.slice(3);
           this.aiSessions.set(userId, { storeSlug: slug });
           const retailer = await this.registry.findBySlug(slug);
-          await ctx.editMessageText(aiGreeting(retailer.name), {
+          await this.safeEditText(ctx, aiGreeting(retailer.name), {
             parse_mode: 'HTML',
             reply_markup: aiModeKeyboard(slug),
           });
@@ -639,7 +639,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     const text = lines.join('\n');
     if (edit) {
-      await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup: keyboard });
+      await this.safeEditText(ctx, text, { parse_mode: 'HTML', reply_markup: keyboard });
     } else {
       await ctx.reply(text, { parse_mode: 'HTML', reply_markup: keyboard });
     }
@@ -663,14 +663,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!categories.length) {
-      await ctx.editMessageText(
+      await this.safeEditText(
+        ctx,
         `No categories found.\n\n💡 <i>Tip: sync your catalog from the seller admin panel.</i>`,
         { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
       );
       return;
     }
 
-    await ctx.editMessageText(
+    await this.safeEditText(
+      ctx,
       `<b>Categories</b> — choose one to browse products:`,
       { parse_mode: 'HTML', reply_markup: categoryKeyboard(slug, categories) },
     );
@@ -720,12 +722,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!pageProducts.length) {
-      await ctx.editMessageText('No products found.', { reply_markup: backKeyboard(slug) });
+      await this.safeEditText(ctx, 'No products found.', { reply_markup: backKeyboard(slug) });
       return;
     }
 
     const syncNote = synced ? '' : '\n\n<i>💡 Sync catalog for faster browsing.</i>';
-    await ctx.editMessageText(
+    await this.safeEditText(
+      ctx,
       `<b>Products</b> (page ${page + 1})${syncNote}\n\n<i>Tap a product for details:</i>`,
       {
         parse_mode: 'HTML',
@@ -771,18 +774,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // ── 2. Track last store for /cart command ─────────────────────────────────
     if (userId) this.lastStoreSlug.set(userId, slug);
 
-    // ── 3. Build message text ─────────────────────────────────────────────────
-    // Use Telegram's invisible-link-preview trick:
-    // An anchor tag with a zero-width-space (&#8203;) as text causes Telegram to
-    // display the image as a preview thumbnail while keeping the message as text.
-    // This avoids the replyWithPhoto approach which breaks editMessageText flows.
-    let msg = productDetail(product);
+    // ── 3. Resolve image URL ──────────────────────────────────────────────────
     const imageUrl = Array.isArray(product.images)
       ? product.images[0]
       : (product.image_url as string | undefined);
-    if (imageUrl?.startsWith('http')) {
-      msg = `<a href="${imageUrl}">&#8203;</a>${msg}`;
-    }
 
     // ── 4. Choose keyboard based on context ───────────────────────────────────
     // Priority: AI session > global search query > default category nav.
@@ -795,12 +790,30 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       keyboard = productDetailKeyboard(slug, productId, 'all', 0);
     }
 
-    // ── 5. Edit the existing message (stays as text → all nav works) ──────────
-    try {
-      await ctx.editMessageText(msg, { parse_mode: 'HTML', reply_markup: keyboard });
-    } catch {
-      // Fallback: send new message (e.g. triggered from a non-inline context)
-      await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: keyboard });
+    // ── 5. Show product — photo if available, plain text otherwise ────────────
+    if (imageUrl?.startsWith('http')) {
+      // Remove the keyboard from the previous list/search message so it doesn't
+      // look orphaned after we send the new photo message below.
+      try { await ctx.editMessageReplyMarkup({ reply_markup: undefined }); } catch {}
+
+      // Telegram photo captions are capped at 1 024 characters.
+      // Truncate long descriptions before building the caption to stay under the limit.
+      const captionProduct = {
+        ...product,
+        description: product.description && product.description.length > 300
+          ? product.description.slice(0, 300) + '…'
+          : product.description,
+      };
+      const caption = productDetail(captionProduct);
+      await ctx.replyWithPhoto(imageUrl, { caption, parse_mode: 'HTML', reply_markup: keyboard });
+    } else {
+      // No image — edit the existing message in-place (keeps thread tidy).
+      const msg = productDetail(product);
+      try {
+        await ctx.editMessageText(msg, { parse_mode: 'HTML', reply_markup: keyboard });
+      } catch {
+        await ctx.reply(msg, { parse_mode: 'HTML', reply_markup: keyboard });
+      }
     }
   }
 
@@ -1391,6 +1404,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       paymentInstructions: r.paymentInstructions,
       assistedLabel: r.assistedLabel,
     };
+  }
+
+  /**
+   * Edit a message text in-place. If that fails (e.g. the current message is a
+   * photo/media message that can't be converted to text), send a fresh text reply.
+   */
+  private async safeEditText(ctx: any, text: string, opts: any = {}): Promise<void> {
+    try {
+      await ctx.editMessageText(text, opts);
+    } catch {
+      await ctx.reply(text, opts);
+    }
   }
 
   private async showPaymentSelection(ctx: any, slug: string, retailer: any): Promise<void> {
