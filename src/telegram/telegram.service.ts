@@ -618,7 +618,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       `🔍 ${label} — ${total} result${total !== 1 ? 's' : ''} across all stores${fallbackNote}\n`,
     ];
 
-    if (hasAnyImages) lines.push('\n<i>📷 = has photo — tap product to view</i>');
+    // if (hasAnyImages) lines.push('\n<i>📷 = has photo — tap product to view</i>');
 
     // Pagination + product buttons keyboard
     const keyboard = new InlineKeyboard();
