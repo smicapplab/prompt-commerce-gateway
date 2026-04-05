@@ -775,9 +775,37 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (userId) this.lastStoreSlug.set(userId, slug);
 
     // ── 3. Resolve image URL ──────────────────────────────────────────────────
-    const imageUrl = Array.isArray(product.images)
+    // The cached value may be:
+    //  a) an absolute HTTPS URL  → use directly
+    //  b) an absolute HTTP URL   → filtered out by sync's filterSecureImageUrls, so
+    //                              cached.images[] ends up empty; handled by (c)
+    //  c) a relative path        → seller_public_url was missing at sync time;
+    //                              absolutise now using the store's mcpServerUrl
+    let imageUrl: string | undefined = Array.isArray(product.images)
       ? product.images[0]
       : (product.image_url as string | undefined);
+
+    if (imageUrl && !imageUrl.startsWith('http')) {
+      // Relative path — build an absolute URL using the store's known public URL.
+      try {
+        const retailer = await this.registry.findBySlug(slug);
+        const base = (retailer.mcpServerUrl ?? '').replace(/\/$/, '');
+        imageUrl = base ? `${base}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}` : undefined;
+      } catch { imageUrl = undefined; }
+    }
+
+    // If still no absolute image in the cache (e.g. filtered out because the
+    // seller runs on HTTP), try the live MCP call for a fresh URL.
+    if (!imageUrl) {
+      try {
+        const retailer = await this.getRetailer(slug);
+        const result   = await callRetailerTool(retailer, 'get_product', { id: productId }) as any;
+        const raw      = result?.content?.[0]?.text ?? '{}';
+        const mcpProd  = JSON.parse(raw);
+        const mcpImg   = Array.isArray(mcpProd.images) ? mcpProd.images[0] : mcpProd.image_url;
+        if (typeof mcpImg === 'string' && mcpImg.startsWith('http')) imageUrl = mcpImg;
+      } catch { /* no image — proceed without */ }
+    }
 
     // ── 4. Choose keyboard based on context ───────────────────────────────────
     // Priority: AI session > global search query > default category nav.
