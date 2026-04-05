@@ -46,6 +46,9 @@ model Retailer {
   paymentLinkTemplate  String? @map("payment_link_template")
   assistedLabel        String? @map("assisted_label")
   allowCod             Boolean @default(true) @map("allow_cod")
+  // JSON array of enabled payment method IDs, e.g. ["cod","mock","assisted"]
+  // If set and non-empty, takes precedence over paymentProvider+allowCod for Telegram checkout.
+  paymentMethods       String  @default("[]") @map("payment_methods")
 
   platformKey PlatformKey?
   auditLogs   AuditLog[]

@@ -42,6 +42,7 @@ export interface UpdateRetailerDto {
   assistedLabel?:        string | null;
   allowsPickup?:         boolean;
   allowCod?:             boolean;
+  paymentMethods?:       string;
 }
 
 @Injectable()

@@ -139,9 +139,24 @@ export class CatalogController {
       paymentLinkTemplate?: string | null;
       assistedLabel?:       string | null;
       allowCod?:            boolean;
+      paymentMethods?:      string;
     },
   ) {
     const retailer = await this.validateKey(slug, platformKey);
+
+    let methods: string[] = [];
+    try {
+      methods = JSON.parse(body.paymentMethods || '[]');
+    } catch {
+      methods = [];
+    }
+
+    if (methods.length === 0) {
+      // Reconstruct from legacy fields
+      if (body.allowCod !== false) methods.push('cod');
+      const p = (body.paymentProvider || '').toLowerCase();
+      if (p && p !== 'none' && p !== 'cod') methods.push(p);
+    }
 
     let webhookSecret = body.paymentWebhookSecret ?? null;
     if (body.paymentProvider === 'mock' && !webhookSecret) {
@@ -157,6 +172,7 @@ export class CatalogController {
       paymentLinkTemplate:  body.paymentLinkTemplate   ?? null,
       assistedLabel:        body.assistedLabel        ?? null,
       allowCod:             body.allowCod             ?? true,
+      paymentMethods:       JSON.stringify(methods),
     });
 
     return { message: `Payment config updated for "${slug}".` };

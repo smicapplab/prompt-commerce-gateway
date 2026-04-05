@@ -65,6 +65,21 @@ export class PaymentService {
     ]);
   }
 
+  // ── Resolve primary provider ──────────────────────────────────────────────
+
+  private getPrimaryProvider(retailer: any): string {
+    try {
+      const methods = JSON.parse(retailer.paymentMethods || '[]');
+      // Prefer the first non-COD method in the array as the "primary" (webhook target)
+      const online = methods.filter((m: string) => m.toLowerCase() !== 'cod');
+      if (online.length > 0) return online[0].toLowerCase();
+    } catch (e) {
+      this.logger.error(`Failed to parse paymentMethods for ${retailer.slug}: ${e}`);
+    }
+    // Fallback to legacy field
+    return (retailer.paymentProvider || 'mock').toLowerCase();
+  }
+
   // ── Resolve adapter ────────────────────────────────────────────────────────
 
   private async resolveAdapter(provider: string | null | undefined): Promise<PaymentGateway> {
@@ -120,7 +135,7 @@ export class PaymentService {
       };
     }
 
-    const adapter = await this.resolveAdapter(input.providerOverride ?? retailer.paymentProvider);
+    const adapter = await this.resolveAdapter(input.providerOverride ?? this.getPrimaryProvider(retailer));
     const provider = adapter.name;
 
     // Load defaults for Assisted/COD if not overridden
@@ -187,7 +202,7 @@ export class PaymentService {
     });
     if (!retailer) return null;
 
-    const adapter = await this.resolveAdapter(retailer.paymentProvider);
+    const adapter = await this.resolveAdapter(this.getPrimaryProvider(retailer));
     // Use the stored secret, or fall back to 'mock-secret' if it's the mock provider
     const secret = retailer.paymentWebhookSecret || (adapter.name === 'mock' ? 'mock-secret' : '');
 
@@ -254,7 +269,7 @@ export class PaymentService {
       where:  { slug: storeSlug },
     });
     return {
-      provider:      retailer?.paymentProvider  ?? 'mock',
+      provider:      this.getPrimaryProvider(retailer),
       hasApiKey:     !!retailer?.paymentApiKey,
       hasPublicKey:  !!retailer?.paymentPublicKey,
       publicKey:     retailer?.paymentPublicKey  ?? null,

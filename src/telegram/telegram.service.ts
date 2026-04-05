@@ -359,14 +359,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
         // delivery:<type>:<slug> — delivery type selected
         if (data.startsWith('delivery:')) {
-          const [, type, slug] = data.split(':');
+          const firstColon  = data.indexOf(':');
+          const secondColon = data.indexOf(':', firstColon + 1);
+          const type = data.slice(firstColon + 1, secondColon);
+          const slug = data.slice(secondColon + 1);
+
           const state = this.checkoutSessions.get(userId);
           if (!state || state.storeSlug !== slug) return;
 
           state.deliveryType = type as 'delivery' | 'pickup';
           state.step = 'payment';
           this.checkoutSessions.set(userId, state);
-          
+
           const retailer = await this.getRetailer(slug);
           await this.showPaymentSelection(ctx, slug, retailer);
           return;
@@ -374,17 +378,22 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
         // pmnt:<method>:<slug> — payment method selected
         if (data.startsWith('pmnt:')) {
-          const [, method, slug] = data.split(':');
+          const firstColon  = data.indexOf(':');
+          const secondColon = data.indexOf(':', firstColon + 1);
+          const method = data.slice(firstColon + 1, secondColon);
+          const slug = data.slice(secondColon + 1);
+
           const state = this.checkoutSessions.get(userId);
           if (!state || state.storeSlug !== slug) return;
 
-          state.paymentMethod = method as 'cod' | 'gateway';
+          state.paymentMethod = method;
           state.step = 'confirm';
           this.checkoutSessions.set(userId, state);
-          await this.showOrderSummary(ctx, userId, slug, state, true);
+
+          const retailer = await this.getRetailer(slug);
+          await this.showOrderSummary(ctx, userId, slug, state, true, retailer);
           return;
         }
-
         // c:<slug>:<catId> — products in category
         if (data.startsWith('c:')) {
           const parts = data.split(':');
@@ -990,7 +999,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async showOrderSummary(ctx: any, userId: string, storeSlug: string, state: CheckoutState, isEdit = false): Promise<void> {
+  private async showOrderSummary(ctx: any, userId: string, storeSlug: string, state: CheckoutState, isEdit = false, retailer?: any): Promise<void> {
     // ── Refresh prices before confirmation ────────────────────────────────
     const { changed, oldTotal, newTotal } = await this.cartService.validateCartPrices(userId, storeSlug);
     if (changed) {
@@ -1015,7 +1024,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     const deliveryIcon = state.deliveryType === 'pickup' ? '🏪' : '🏠';
     const deliveryText = state.deliveryType === 'pickup' ? 'Store Pickup' : 'Home Delivery';
-    const paymentText = state.paymentMethod === 'cod' ? '💵 Cash on Delivery' : '💳 Online Payment';
+    
+    if (!retailer) {
+      retailer = await this.getRetailer(storeSlug);
+    }
+    const paymentText = this.getPaymentLabel(state.paymentMethod || 'cod', retailer);
 
     const text = `<b>Order Summary</b>\n\n${summary}\n\n<b>Total: ${price(total)}</b>\n\n` +
       `👤 Name: ${esc(state.name)}\n📧 Email: ${esc(state.email)}\n🏠 Address: ${esc(state.address)}\n` +
@@ -1105,7 +1118,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         notes,
         confirm: true,
         delivery_type: state.deliveryType || 'delivery',
-        payment_provider: retailer.paymentProvider || (await this.settings.get('default_payment_provider')) || 'cod',
+        payment_provider: state.paymentMethod || retailer.paymentProvider || (await this.settings.get('default_payment_provider')) || 'cod',
         payment_instructions: retailer.paymentInstructions || (await this.settings.get('default_payment_instructions')) || '',
       }) as any;
 
@@ -1192,7 +1205,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             description: `Order #${orderId} — ${slug}`,
             buyerEmail:  state.email,
             baseUrl,
-            providerOverride: state.paymentMethod === 'cod' ? 'cod' : undefined,
+            providerOverride: state.paymentMethod || undefined,
           });
 
           if (payment.status === 'paid') {
@@ -1429,6 +1442,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       allowsPickup: r.allowsPickup,
       allowCod: r.allowCod,
       paymentProvider: r.paymentProvider,
+      paymentMethods: r.paymentMethods,
       paymentInstructions: r.paymentInstructions,
       assistedLabel: r.assistedLabel,
     };
@@ -1447,37 +1461,82 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async showPaymentSelection(ctx: any, slug: string, retailer: any): Promise<void> {
-    const allowCod = retailer.allowCod ?? true;
-    const provider = (retailer.paymentProvider || 'cod').toLowerCase();
-    const hasRealGateway = !['cod', 'mock', 'assisted'].includes(provider);
+    const userId = ctx.from?.id?.toString() ?? '';
+    const state = this.checkoutSessions.get(userId);
+    if (!state) return;
 
-    // If only one method is possible, skip selection
-    if (!hasRealGateway || !allowCod) {
-      // Auto-select the only available method
-      const state = this.checkoutSessions.get(ctx.from?.id?.toString() ?? '');
-      if (state) {
-        // If COD is disabled, we MUST use gateway (even if it's just mock/assisted)
-        // If COD is enabled but there's no real online gateway, we prefer COD
-        state.paymentMethod = !allowCod ? 'gateway' : 'cod';
-        state.step = 'confirm';
-        this.checkoutSessions.set(ctx.from?.id?.toString() ?? '', state);
-        await this.showOrderSummary(ctx, ctx.from?.id?.toString() ?? '', state.storeSlug, state);
+    // ── Parse payment methods ─────────────────────────────────────────────
+    let methods: string[] = [];
+    try {
+      methods = JSON.parse(retailer.paymentMethods || '[]');
+    } catch (e) {
+      this.logger.error(`Failed to parse paymentMethods for ${slug}: ${e}`);
+    }
+
+    // Fallback to legacy logic if paymentMethods is empty
+    if (methods.length === 0) {
+      const allowCod         = retailer.allowCod ?? true;
+      const provider         = (retailer.paymentProvider || 'cod').toLowerCase();
+      const hasOnlinePayment = provider !== 'cod';
+
+      if (hasOnlinePayment && allowCod) {
+        const onlineLabel = provider === 'assisted'
+          ? `💳 ${retailer.assistedLabel || 'Bank / GCash'}`
+          : '💳 Pay Online';
+
+        const onlineId = provider === 'assisted' ? 'assisted' : provider;
+
+        const kb = new InlineKeyboard()
+          .text('💵 Cash on Delivery', `pmnt:cod:${slug}`).row()
+          .text(onlineLabel,           `pmnt:${onlineId}:${slug}`).row()
+          .text('❌ Cancel',           `cancel:${slug}`);
+
+        await ctx.reply('💳 <b>How would you like to pay?</b>', {
+          parse_mode: 'HTML',
+          reply_markup: kb,
+        });
+        return;
       }
+
+      // Only one method available — auto-select and skip the screen.
+      state.paymentMethod = hasOnlinePayment ? provider : 'cod';
+      state.step = 'confirm';
+      this.checkoutSessions.set(userId, state);
+      await this.showOrderSummary(ctx, userId, state.storeSlug, state, false, retailer);
       return;
     }
 
-    const kb = new InlineKeyboard();
-    const onlineLabel = provider === 'assisted' 
-      ? `💳 ${retailer.assistedLabel || 'Bank / GCash'}`
-      : '💳 Pay Online';
+    // ── New multi-method logic ────────────────────────────────────────────
+    if (methods.length > 1) {
+      const kb = new InlineKeyboard();
+      for (const m of methods) {
+        const label = this.getPaymentLabel(m, retailer);
+        kb.text(label, `pmnt:${m}:${slug}`).row();
+      }
+      kb.text('❌ Cancel', `cancel:${slug}`);
 
-    if (allowCod) kb.text('💵 Cash on Delivery', `pmnt:cod:${slug}`).row();
-    if (hasRealGateway) kb.text(onlineLabel, `pmnt:gateway:${slug}`).row();
-    kb.text('❌ Cancel', `cancel:${slug}`);
+      await ctx.reply('💳 <b>How would you like to pay?</b>', {
+        parse_mode: 'HTML',
+        reply_markup: kb,
+      });
+      return;
+    }
 
-    await ctx.reply('💳 <b>How would you like to pay?</b>', {
-      parse_mode: 'HTML',
-      reply_markup: kb,
-    });
+    // Only one method available — auto-select and skip the screen.
+    state.paymentMethod = methods[0];
+    state.step = 'confirm';
+    this.checkoutSessions.set(userId, state);
+    await this.showOrderSummary(ctx, userId, state.storeSlug, state, false, retailer);
+  }
+
+  private getPaymentLabel(id: string, retailer: any): string {
+    switch (id.toLowerCase()) {
+      case 'cod':       return '💵 Cash on Delivery';
+      case 'mock':      return '🧪 Mock Payment (Test)';
+      case 'assisted':  return `💳 ${retailer.assistedLabel || 'Bank / GCash'}`;
+      case 'paymongo':  return '💳 PayMongo';
+      case 'stripe':    return '💳 Stripe';
+      default:          return `💳 ${id.toUpperCase()}`;
+    }
   }
 }
