@@ -28,7 +28,7 @@ interface CheckoutState {
   email?:        string;
   address?:      string;
   deliveryType?: 'delivery' | 'pickup';
-  paymentMethod?: 'cod' | 'gateway';  // 'gateway' = store's configured provider
+  paymentMethod?: string;  // e.g. 'cod', 'mock', 'assisted', 'paymongo', 'stripe'
 }
 
 // ─── AI session state ─────────────────────────────────────────────────────────

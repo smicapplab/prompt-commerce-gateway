@@ -95,6 +95,7 @@ The gateway parses natural language queries into structured filters (price, stoc
 ### Checkout & Order Flow
 
 - **Multi-step checkout in-bot** — customers provide name, email, and delivery address through a guided conversation.
+- **Payment Method Selection** — dynamically offers a choice of enabled methods (COD, Online, Assisted) based on seller configuration.
 - **Dynamic Delivery Options** — supports both **Home Delivery** and **Store Pickup** based on seller settings.
 - **Input validation** — name (1–100 chars), email (RFC-compliant regex + 254-char max), address (1–300 chars).
 - **Order rate limiting** — atomic one-order-per-30-seconds guard per user to prevent double-submissions.
@@ -103,7 +104,7 @@ The gateway parses natural language queries into structured filters (price, stoc
 
 ### Payment Integration (Universal Adapter)
 
-Supports multiple payment providers via a pluggable adapter:
+Supports any combination of payment providers simultaneously via a pluggable adapter:
 
 | Provider | Method |
 |----------|--------|
@@ -113,7 +114,7 @@ Supports multiple payment providers via a pluggable adapter:
 | **PayMongo** | GCash, Maya, GrabPay (redirect) with link-specific webhook handling |
 | **Stripe** | Hosted Checkout Sessions (cards, worldwide) |
 
-Payment config is pushed automatically from the seller admin on every save — no manual gateway configuration needed. Platform admins can also set network-wide **default providers** and instructions.
+Sellers can enable multiple methods; the gateway automatically resolves the primary online provider for webhooks and provides selection buttons in Telegram. Payment config is pushed automatically from the seller admin on every save.
 
 ### Network Order Dashboard (Admin Only)
 
