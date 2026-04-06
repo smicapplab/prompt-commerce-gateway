@@ -1241,18 +1241,35 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               { parse_mode: 'HTML', reply_markup: payKb },
             );
           } else if (payment.paymentUrl) {
-            // Gateway/mock with hosted checkout — send payment link
-            const payKb = new InlineKeyboard()
-              .url('💳 Pay Now', payment.paymentUrl)
-              .row()
-              .text('🏠 Back to store', `bk:${slug}`);
+            // Gateway/mock with hosted checkout — send payment link.
+            // Telegram rejects inline keyboard url buttons that point to localhost/private IPs,
+            // so we detect that case and fall back to sending the URL as plain text.
+            const isLocalUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(payment.paymentUrl);
 
-            await ctx.editMessageText(
-              `✅ <b>Order #${orderId} placed!</b>\n\n` +
-              `Please complete your payment of <b>${price(total)}</b> using the button below.\n\n` +
-              `<i>You'll receive a confirmation message once payment is verified.</i>`,
-              { parse_mode: 'HTML', reply_markup: payKb },
-            );
+            if (isLocalUrl) {
+              // Dev mode: no public URL configured — show link as text so devs can open it manually.
+              await this.safeEditText(
+                ctx,
+                `✅ <b>Order #${orderId} placed!</b>\n\n` +
+                `🧪 <b>Mock payment (local dev):</b>\n` +
+                `Open this link in your browser to complete the test payment:\n` +
+                `<code>${payment.paymentUrl}</code>`,
+                { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+              );
+            } else {
+              const payKb = new InlineKeyboard()
+                .url('💳 Pay Now', payment.paymentUrl)
+                .row()
+                .text('🏠 Back to store', `bk:${slug}`);
+
+              await this.safeEditText(
+                ctx,
+                `✅ <b>Order #${orderId} placed!</b>\n\n` +
+                `Please complete your payment of <b>${price(total)}</b> using the button below.\n\n` +
+                `<i>You'll receive a confirmation message once payment is verified.</i>`,
+                { parse_mode: 'HTML', reply_markup: payKb },
+              );
+            }
           } else {
             // Fallback: payment initiated but no URL
             await ctx.editMessageText(
@@ -1261,10 +1278,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             );
           }
           return;
-        } catch (payErr) {
-          this.logger.error(`Payment initiation failed for order ${orderId}: ${payErr}`);
-          await ctx.editMessageText(
-            orderConfirmation(orderId, items, total) + 
+        } catch (payErr: any) {
+          const errMsg = payErr?.message ?? String(payErr);
+          this.logger.error(`Payment initiation failed for order ${orderId}: ${errMsg}`, payErr?.stack);
+          await this.safeEditText(
+            ctx,
+            orderConfirmation(orderId, items, total) +
             '\n\n⚠️ <b>Payment initiation failed.</b> Your order has been placed, but we couldn\'t process the payment online. Please contact the store to arrange payment.',
             { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
           );
