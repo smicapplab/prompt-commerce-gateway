@@ -1209,7 +1209,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           });
 
           if (payment.status === 'paid') {
-            // Mock gateway — confirmed instantly, no redirect needed
+            // Payment confirmed instantly (e.g. if a gateway settles synchronously)
             await ctx.editMessageText(
               orderConfirmation(orderId, items, total),
               { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
@@ -1241,7 +1241,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               { parse_mode: 'HTML', reply_markup: payKb },
             );
           } else if (payment.paymentUrl) {
-            // Real gateway — send payment link
+            // Gateway/mock with hosted checkout — send payment link
             const payKb = new InlineKeyboard()
               .url('💳 Pay Now', payment.paymentUrl)
               .row()

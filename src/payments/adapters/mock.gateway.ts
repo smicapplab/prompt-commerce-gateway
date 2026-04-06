@@ -18,9 +18,21 @@ export class MockGateway implements PaymentGateway {
     // Generate a deterministic reference ID for traceability
     const referenceId = `mock_${order.storeSlug}_${order.orderId}_${Date.now()}`;
 
+    // Derive the gateway base URL from the webhookUrl
+    // e.g. "https://gw.example.com/webhooks/payment/mystore" → "https://gw.example.com"
+    let baseUrl = '';
+    try {
+      const u = new URL(order.webhookUrl);
+      baseUrl = u.origin;
+    } catch {
+      // fallback: strip everything after /webhooks
+      baseUrl = order.webhookUrl.replace(/\/webhooks.*$/, '');
+    }
+
     return {
       referenceId,
-      status: 'paid', // Confirm instantly - no redirect needed
+      status: 'pending',
+      paymentUrl: `${baseUrl}/mock-pay?ref=${encodeURIComponent(referenceId)}`,
     };
   }
 
