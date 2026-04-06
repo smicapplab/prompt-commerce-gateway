@@ -62,6 +62,7 @@ async function bootstrap(): Promise<void> {
         req.path.startsWith('/sse') ||
         req.path.startsWith('/webhooks') ||
         req.path.startsWith('/payment') ||
+        req.path.startsWith('/mock-pay') ||
         req.path.includes('.')
       ) {
         return next();
