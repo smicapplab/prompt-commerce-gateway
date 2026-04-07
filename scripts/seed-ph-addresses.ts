@@ -64,7 +64,7 @@ async function main() {
     }
     
     // Chunking the cities insertion
-    const CHUNK_SIZE = 500;
+    const CHUNK_SIZE = 100;
     for (let i = 0; i < cityOps.length; i += CHUNK_SIZE) {
       const chunk = cityOps.slice(i, i + CHUNK_SIZE);
       await prisma.$transaction(chunk);
