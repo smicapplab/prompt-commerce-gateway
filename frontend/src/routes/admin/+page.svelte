@@ -39,9 +39,9 @@
   let loginError = $state("");
 
   // Dashboard State
-  let currentTab = $state<"pending" | "verified" | "all" | "chat" | "payments" | "orders" | "settings">(
-    "pending",
-  );
+  let currentTab = $state<
+    "pending" | "verified" | "all" | "chat" | "payments" | "orders" | "settings"
+  >("pending");
   let retailers = $state<any[]>([]);
   let isLoadingRetailers = $state(false);
 
@@ -147,16 +147,26 @@
       loadRetailers();
       resetActivity();
     }
-    
+
     // Activity tracking
-    const activityEvents = ["mousedown", "mousemove", "keydown", "scroll", "touchstart"];
+    const activityEvents = [
+      "mousedown",
+      "mousemove",
+      "keydown",
+      "scroll",
+      "touchstart",
+    ];
     const handleActivity = () => resetActivity();
-    activityEvents.forEach(e => window.addEventListener(e, handleActivity, { passive: true }));
-    
+    activityEvents.forEach((e) =>
+      window.addEventListener(e, handleActivity, { passive: true }),
+    );
+
     activityTimeout = setInterval(checkActivity, 60000); // Check every minute
-    
+
     return () => {
-      activityEvents.forEach(e => window.removeEventListener(e, handleActivity));
+      activityEvents.forEach((e) =>
+        window.removeEventListener(e, handleActivity),
+      );
       clearInterval(activityTimeout);
     };
   });
@@ -380,10 +390,18 @@
 
     try {
       await Promise.all([
-        api("PUT", "/api/settings/default_payment_provider", { value: defaultPaymentProvider }),
-        api("PUT", "/api/settings/default_payment_instructions", { value: defaultPaymentInstructions }),
-        api("PUT", "/api/settings/default_payment_link_template", { value: defaultPaymentLinkTemplate }),
-        api("PUT", "/api/settings/default_payment_label", { value: defaultPaymentLabel }),
+        api("PUT", "/api/settings/default_payment_provider", {
+          value: defaultPaymentProvider,
+        }),
+        api("PUT", "/api/settings/default_payment_instructions", {
+          value: defaultPaymentInstructions,
+        }),
+        api("PUT", "/api/settings/default_payment_link_template", {
+          value: defaultPaymentLinkTemplate,
+        }),
+        api("PUT", "/api/settings/default_payment_label", {
+          value: defaultPaymentLabel,
+        }),
       ]);
       paymentsSavedMsg = "Payment settings saved.";
       setTimeout(() => {
@@ -402,7 +420,7 @@
     if (orderStoreFilter) params.append("store", orderStoreFilter);
     if (orderStatusFilter) params.append("status", orderStatusFilter);
     params.append("page", String(orderPage));
-    
+
     const data = await api("GET", `/api/orders?${params}`);
     isLoadingOrders = false;
     if (data) {
@@ -412,7 +430,16 @@
     }
   }
 
-  function switchTab(tab: "pending" | "verified" | "all" | "chat" | "payments" | "orders" | "settings") {
+  function switchTab(
+    tab:
+      | "pending"
+      | "verified"
+      | "all"
+      | "chat"
+      | "payments"
+      | "orders"
+      | "settings",
+  ) {
     currentTab = tab;
     showKeyBanner = false;
     clearInterval(chatPollingInterval);
@@ -490,7 +517,7 @@
             >
               Admin Portal
             </h1>
-            <p class="text-gray-500 font-medium text-lg mt-2">
+            <p class="text-gray-500 font-medium text-sm mt-2">
               Manage your AI retail network
             </p>
           </div>
@@ -518,7 +545,7 @@
               bind:value={lUser}
               placeholder="admin"
               required
-              class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-lg shadow-sm"
+              class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-sm shadow-sm"
             />
           </div>
           <div>
@@ -534,7 +561,7 @@
                 bind:value={lPass}
                 placeholder="••••••••"
                 required
-                class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-lg shadow-sm pr-14"
+                class="w-full bg-gray-50 border border-gray-200 rounded-2xl px-6 py-5 text-gray-900 font-black focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-gray-300 text-sm shadow-sm pr-14"
               />
               <button
                 type="button"
@@ -572,13 +599,13 @@
 {:else}
   <!-- ADMIN DASHBOARD (Premium Light Theme) -->
   <div
-    class="min-h-screen bg-gray-50 text-gray-900 flex h-[calc(100vh-80px)] overflow-hidden font-sans"
+    class="bg-gray-50 text-gray-900 flex h-[calc(100vh-5rem)] overflow-hidden font-sans"
   >
     <!-- Sidebar -->
     <aside
       class="w-64 md:w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm relative z-20"
     >
-      <div class="p-8 flex flex-col gap-3 overflow-y-auto flex-1">
+      <div class="p-6 flex flex-col gap-2 flex-1 min-h-0 overflow-y-auto">
         <h3
           class="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-4 ml-1"
         >
@@ -587,7 +614,7 @@
 
         <button
           onclick={() => switchTab("pending")}
-          class="group flex items-center justify-between px-5 py-4 rounded-2xl transition-all {currentTab ===
+          class="group flex items-center justify-between px-5 py-3 rounded-2xl transition-all text-sm {currentTab ===
           'pending'
             ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
@@ -609,7 +636,7 @@
 
         <button
           onclick={() => switchTab("verified")}
-          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
+          class="flex items-center gap-4 px-5 py-3 rounded-2xl transition-all text-sm {currentTab ===
           'verified'
             ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
@@ -619,7 +646,7 @@
 
         <button
           onclick={() => switchTab("all")}
-          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
+          class="flex items-center gap-4 px-5 py-3 rounded-2xl transition-all text-sm {currentTab ===
           'all'
             ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
@@ -629,7 +656,7 @@
 
         <button
           onclick={() => switchTab("chat")}
-          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
+          class="flex items-center gap-4 px-5 py-3 rounded-2xl transition-all text-sm {currentTab ===
           'chat'
             ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
@@ -639,7 +666,7 @@
 
         <button
           onclick={() => switchTab("orders")}
-          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
+          class="flex items-center gap-4 px-5 py-3 rounded-2xl transition-all text-sm {currentTab ===
           'orders'
             ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
@@ -655,7 +682,7 @@
 
         <button
           onclick={() => switchTab("settings")}
-          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
+          class="flex items-center gap-4 px-5 py-3 rounded-2xl transition-all text-sm {currentTab ===
           'settings'
             ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
@@ -665,7 +692,7 @@
 
         <button
           onclick={() => switchTab("payments")}
-          class="flex items-center gap-4 px-5 py-4 rounded-2xl transition-all {currentTab ===
+          class="flex items-center gap-4 px-5 py-3 rounded-2xl transition-all text-sm {currentTab ===
           'payments'
             ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
             : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
@@ -674,10 +701,10 @@
         </button>
       </div>
 
-      <div class="mt-auto p-8 border-t border-gray-100">
+      <div class="mt-auto border-t border-gray-100">
         <button
           onclick={logout}
-          class="w-full flex items-center justify-center gap-4 px-6 py-4 text-gray-900 border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-all rounded-2xl font-black shadow-sm"
+          class="py-5 w-full flex items-center justify-center gap-4 px-6 py-3 text-sm text-gray-900 border-0 hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-all font-black"
         >
           <LogOut size={20} strokeWidth={2.5} />
           Sign out
@@ -706,10 +733,10 @@
                       : currentTab === "orders"
                         ? "Network Order Dashboard"
                         : currentTab === "payments"
-                        ? "Gateway Payments"
-                        : "Gateway Settings"}
+                          ? "Gateway Payments"
+                          : "Gateway Settings"}
             </h1>
-            <p class="text-gray-500 font-medium text-lg mt-2">
+            <p class="text-gray-500 font-medium text-sm mt-2">
               {currentTab === "settings"
                 ? "Global gateway configuration and bot secrets."
                 : currentTab === "payments"
@@ -722,10 +749,16 @@
 
           {#if currentTab !== "settings"}
             <button
-              onclick={currentTab === 'chat' ? loadConversations : loadRetailers}
+              onclick={currentTab === "chat"
+                ? loadConversations
+                : loadRetailers}
               class="p-3 bg-white border border-gray-200 rounded-2xl text-gray-400 hover:text-gray-900 transition-all shadow-sm hover:shadow-lg active:scale-90"
             >
-              <RotateCw class="w-6 h-6 {isLoadingConversations || isLoadingRetailers ? 'animate-spin' : ''}" />
+              <RotateCw
+                class="w-6 h-6 {isLoadingConversations || isLoadingRetailers
+                  ? 'animate-spin'
+                  : ''}"
+              />
             </button>
           {/if}
         </header>
@@ -877,9 +910,7 @@
                     >
                       Default Payment Settings
                     </h2>
-                    <p
-                      class="text-gray-400 font-medium text-sm mt-0.5"
-                    >
+                    <p class="text-gray-400 font-medium text-sm mt-0.5">
                       Fallbacks for stores with no payment config
                     </p>
                   </div>
@@ -887,11 +918,14 @@
 
                 <div class="space-y-8">
                   <div>
-                    <span class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1">Default Provider</span>
+                    <span
+                      class="block text-[10px] font-black text-gray-400 uppercase tracking-[0.25em] mb-3 ml-1"
+                      >Default Provider</span
+                    >
                     <div class="grid grid-cols-2 gap-3">
                       {#each [["mock", "📦 Mock"], ["cod", "💵 COD"], ["assisted", "🤝 Assisted"]] as [pid, label]}
                         <button
-                          onclick={() => defaultPaymentProvider = pid}
+                          onclick={() => (defaultPaymentProvider = pid)}
                           class="rounded-2xl border-2 px-6 py-4 text-sm font-black transition-all
                             {defaultPaymentProvider === pid
                             ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-lg shadow-blue-500/10'
@@ -903,9 +937,15 @@
                   </div>
 
                   {#if defaultPaymentProvider === "assisted"}
-                    <div class="p-8 bg-blue-50/50 rounded-3xl border border-blue-100 space-y-6">
+                    <div
+                      class="p-8 bg-blue-50/50 rounded-3xl border border-blue-100 space-y-6"
+                    >
                       <div>
-                        <label for="assisted-label" class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1">Assisted Label</label>
+                        <label
+                          for="assisted-label"
+                          class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1"
+                          >Assisted Label</label
+                        >
                         <input
                           id="assisted-label"
                           type="text"
@@ -915,7 +955,11 @@
                         />
                       </div>
                       <div>
-                        <label for="default-instructions" class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1">Default Instructions</label>
+                        <label
+                          for="default-instructions"
+                          class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1"
+                          >Default Instructions</label
+                        >
                         <textarea
                           id="default-instructions"
                           bind:value={defaultPaymentInstructions}
@@ -925,7 +969,11 @@
                         ></textarea>
                       </div>
                       <div>
-                        <label for="default-link-template" class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1">Default Link Template</label>
+                        <label
+                          for="default-link-template"
+                          class="block text-[10px] font-black text-blue-400 uppercase tracking-[0.25em] mb-3 ml-1"
+                          >Default Link Template</label
+                        >
                         <input
                           id="default-link-template"
                           type="text"
@@ -977,35 +1025,70 @@
             <!-- Stats Grid -->
             {#if orderStats}
               <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm">
-                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Total Orders</p>
+                <div
+                  class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm"
+                >
+                  <p
+                    class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2"
+                  >
+                    Total Orders
+                  </p>
                   <p class="text-3xl font-black text-gray-900">{ordersTotal}</p>
                 </div>
-                <div class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm">
-                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Avg Fulfillment</p>
-                  <p class="text-3xl font-black text-blue-600">{orderStats.avgFulfillmentHours.toFixed(1)}h</p>
-                </div>
-                <div class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm">
-                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Pending</p>
-                  <p class="text-3xl font-black text-amber-500">
-                    {orderStats.byStatus.find(s => s.orderStatus === 'pending')?._count ?? 0}
+                <div
+                  class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm"
+                >
+                  <p
+                    class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2"
+                  >
+                    Avg Fulfillment
+                  </p>
+                  <p class="text-3xl font-black text-blue-600">
+                    {orderStats.avgFulfillmentHours.toFixed(1)}h
                   </p>
                 </div>
-                <div class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm">
-                  <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Delivered</p>
+                <div
+                  class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm"
+                >
+                  <p
+                    class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2"
+                  >
+                    Pending
+                  </p>
+                  <p class="text-3xl font-black text-amber-500">
+                    {orderStats.byStatus.find(
+                      (s) => s.orderStatus === "pending",
+                    )?._count ?? 0}
+                  </p>
+                </div>
+                <div
+                  class="bg-white border border-gray-200 rounded-[2rem] p-8 shadow-sm"
+                >
+                  <p
+                    class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2"
+                  >
+                    Delivered
+                  </p>
                   <p class="text-3xl font-black text-emerald-600">
-                    {orderStats.byStatus.find(s => s.orderStatus === 'delivered')?._count ?? 0}
+                    {orderStats.byStatus.find(
+                      (s) => s.orderStatus === "delivered",
+                    )?._count ?? 0}
                   </p>
                 </div>
               </div>
             {/if}
 
             <!-- Filters -->
-            <div class="flex flex-wrap gap-4 bg-white border border-gray-200 rounded-[2rem] p-6 shadow-sm">
+            <div
+              class="flex flex-wrap gap-4 bg-white border border-gray-200 rounded-[2rem] p-6 shadow-sm"
+            >
               <div class="flex-1 min-w-[200px]">
-                <select 
-                  bind:value={orderStoreFilter} 
-                  onchange={() => { orderPage = 1; loadOrders(); }}
+                <select
+                  bind:value={orderStoreFilter}
+                  onchange={() => {
+                    orderPage = 1;
+                    loadOrders();
+                  }}
                   class="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:border-blue-500 transition-all"
                 >
                   <option value="">All Stores</option>
@@ -1015,14 +1098,19 @@
                 </select>
               </div>
               <div class="flex-1 min-w-[200px]">
-                <select 
-                  bind:value={orderStatusFilter} 
-                  onchange={() => { orderPage = 1; loadOrders(); }}
+                <select
+                  bind:value={orderStatusFilter}
+                  onchange={() => {
+                    orderPage = 1;
+                    loadOrders();
+                  }}
                   class="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:border-blue-500 transition-all"
                 >
                   <option value="">All Statuses</option>
                   {#each ["pending_payment", "pending", "paid", "picking", "packing", "ready_for_pickup", "picked_up", "in_transit", "delivered", "cancelled", "refunded"] as s}
-                    <option value={s}>{s.replace(/_/g, ' ').toUpperCase()}</option>
+                    <option value={s}
+                      >{s.replace(/_/g, " ").toUpperCase()}</option
+                    >
                   {/each}
                 </select>
               </div>
@@ -1030,55 +1118,106 @@
                 onclick={loadOrders}
                 class="p-3 bg-gray-900 text-white rounded-xl hover:bg-black transition-all active:scale-95"
               >
-                <RotateCw size={20} class={isLoadingOrders ? 'animate-spin' : ''} />
+                <RotateCw
+                  size={20}
+                  class={isLoadingOrders ? "animate-spin" : ""}
+                />
               </button>
             </div>
 
             <!-- Orders Table -->
-            <div class="bg-white border border-gray-200 rounded-[2.5rem] shadow-xl shadow-gray-200/50 overflow-hidden">
+            <div
+              class="bg-white border border-gray-200 rounded-[2.5rem] shadow-xl shadow-gray-200/50 overflow-hidden"
+            >
               <table class="w-full text-left border-collapse">
                 <thead>
                   <tr class="bg-gray-50/50 border-b border-gray-100">
-                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Order ID</th>
-                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Store</th>
-                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Buyer</th>
-                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Status</th>
-                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Total</th>
-                    <th class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 text-right">Actions</th>
+                    <th
+                      class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400"
+                      >Order ID</th
+                    >
+                    <th
+                      class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400"
+                      >Store</th
+                    >
+                    <th
+                      class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400"
+                      >Buyer</th
+                    >
+                    <th
+                      class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400"
+                      >Status</th
+                    >
+                    <th
+                      class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400"
+                      >Total</th
+                    >
+                    <th
+                      class="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 text-right"
+                      >Actions</th
+                    >
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-50">
                   {#if isLoadingOrders}
-                    <tr><td colspan="6" class="px-8 py-24 text-center text-gray-400 font-bold">Loading order ledger...</td></tr>
+                    <tr
+                      ><td
+                        colspan="6"
+                        class="px-8 py-24 text-center text-gray-400 font-bold"
+                        >Loading order ledger...</td
+                      ></tr
+                    >
                   {:else if orders.length === 0}
-                    <tr><td colspan="6" class="px-8 py-24 text-center text-gray-400 font-bold">No orders found.</td></tr>
+                    <tr
+                      ><td
+                        colspan="6"
+                        class="px-8 py-24 text-center text-gray-400 font-bold"
+                        >No orders found.</td
+                      ></tr
+                    >
                   {:else}
                     {#each orders as o}
                       <tr class="group hover:bg-gray-50/30 transition-colors">
-                        <td class="px-8 py-6 font-mono text-xs font-black text-blue-600">#{String(o.orderId).padStart(6, '0')}</td>
+                        <td
+                          class="px-8 py-6 font-mono text-xs font-black text-blue-600"
+                          >#{String(o.orderId).padStart(6, "0")}</td
+                        >
                         <td class="px-8 py-6">
-                          <span class="text-sm font-bold text-gray-900">{o.storeSlug}</span>
+                          <span class="text-sm font-bold text-gray-900"
+                            >{o.storeSlug}</span
+                          >
                         </td>
                         <td class="px-8 py-6">
-                          <span class="text-sm font-bold text-gray-500">{o.buyerRef}</span>
+                          <span class="text-sm font-bold text-gray-500"
+                            >{o.buyerRef}</span
+                          >
                         </td>
                         <td class="px-8 py-6">
-                          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border
-                            {o.orderStatus === 'delivered' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
-                             o.orderStatus === 'cancelled' ? 'bg-red-50 text-red-700 border-red-100' :
-                             'bg-blue-50 text-blue-700 border-blue-100'}">
-                            {o.orderStatus.replace(/_/g, ' ')}
+                          <span
+                            class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border
+                            {o.orderStatus === 'delivered'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                              : o.orderStatus === 'cancelled'
+                                ? 'bg-red-50 text-red-700 border-red-100'
+                                : 'bg-blue-50 text-blue-700 border-blue-100'}"
+                          >
+                            {o.orderStatus.replace(/_/g, " ")}
                           </span>
                         </td>
                         <td class="px-8 py-6 font-black text-gray-900">
-                          {new Intl.NumberFormat('en-PH', { style: 'currency', currency: o.currency }).format(o.amount)}
+                          {new Intl.NumberFormat("en-PH", {
+                            style: "currency",
+                            currency: o.currency,
+                          }).format(o.amount)}
                         </td>
                         <td class="px-8 py-6 text-right">
-                          <button 
-                            onclick={() => orderExpandedId = orderExpandedId === o.id ? null : o.id}
+                          <button
+                            onclick={() =>
+                              (orderExpandedId =
+                                orderExpandedId === o.id ? null : o.id)}
                             class="text-[10px] font-black text-gray-400 hover:text-gray-900 uppercase tracking-widest"
                           >
-                            {orderExpandedId === o.id ? 'Close' : 'View Detail'}
+                            {orderExpandedId === o.id ? "Close" : "View Detail"}
                           </button>
                         </td>
                       </tr>
@@ -1087,47 +1226,122 @@
                           <td colspan="6" class="px-12 py-10">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
                               <div>
-                                <h4 class="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-6">Fulfillment Details</h4>
+                                <h4
+                                  class="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-6"
+                                >
+                                  Fulfillment Details
+                                </h4>
                                 <div class="space-y-4">
-                                  <div class="flex justify-between border-b border-gray-100 pb-3">
-                                    <span class="text-xs font-bold text-gray-400 uppercase">Delivery Type</span>
-                                    <span class="text-xs font-black text-gray-900 uppercase">{o.deliveryType}</span>
+                                  <div
+                                    class="flex justify-between border-b border-gray-100 pb-3"
+                                  >
+                                    <span
+                                      class="text-xs font-bold text-gray-400 uppercase"
+                                      >Delivery Type</span
+                                    >
+                                    <span
+                                      class="text-xs font-black text-gray-900 uppercase"
+                                      >{o.deliveryType}</span
+                                    >
                                   </div>
                                   {#if o.trackingNumber}
-                                    <div class="flex justify-between border-b border-gray-100 pb-3">
-                                      <span class="text-xs font-bold text-gray-400 uppercase">Tracking</span>
-                                      <span class="text-xs font-black text-gray-900">{o.courierName}: {o.trackingNumber}</span>
+                                    <div
+                                      class="flex justify-between border-b border-gray-100 pb-3"
+                                    >
+                                      <span
+                                        class="text-xs font-bold text-gray-400 uppercase"
+                                        >Tracking</span
+                                      >
+                                      <span
+                                        class="text-xs font-black text-gray-900"
+                                        >{o.courierName}: {o.trackingNumber}</span
+                                      >
                                     </div>
                                   {/if}
-                                  <div class="flex justify-between border-b border-gray-100 pb-3">
-                                    <span class="text-xs font-bold text-gray-400 uppercase">Payment Method</span>
-                                    <span class="text-xs font-black text-gray-900 uppercase">{o.provider}</span>
+                                  <div
+                                    class="flex justify-between border-b border-gray-100 pb-3"
+                                  >
+                                    <span
+                                      class="text-xs font-bold text-gray-400 uppercase"
+                                      >Payment Method</span
+                                    >
+                                    <span
+                                      class="text-xs font-black text-gray-900 uppercase"
+                                      >{o.provider}</span
+                                    >
                                   </div>
-                                  <div class="flex justify-between border-b border-gray-100 pb-3">
-                                    <span class="text-xs font-bold text-gray-400 uppercase">Created At</span>
-                                    <span class="text-xs font-black text-gray-900">{new Date(o.createdAt).toLocaleString()}</span>
+                                  <div
+                                    class="flex justify-between border-b border-gray-100 pb-3"
+                                  >
+                                    <span
+                                      class="text-xs font-bold text-gray-400 uppercase"
+                                      >Created At</span
+                                    >
+                                    <span
+                                      class="text-xs font-black text-gray-900"
+                                      >{new Date(
+                                        o.createdAt,
+                                      ).toLocaleString()}</span
+                                    >
                                   </div>
                                 </div>
                               </div>
                               <div>
-                                <div class="flex items-center justify-between mb-6">
-                                  <h4 class="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Internal Timeline</h4>
-                                  <label class="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" bind:checked={showDeletedOrderItems} class="w-3 h-3 rounded text-blue-600">
-                                    <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">Show Deleted</span>
+                                <div
+                                  class="flex items-center justify-between mb-6"
+                                >
+                                  <h4
+                                    class="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]"
+                                  >
+                                    Internal Timeline
+                                  </h4>
+                                  <label
+                                    class="flex items-center gap-2 cursor-pointer"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      bind:checked={showDeletedOrderItems}
+                                      class="w-3 h-3 rounded text-blue-600"
+                                    />
+                                    <span
+                                      class="text-[9px] font-black text-gray-400 uppercase tracking-widest"
+                                      >Show Deleted</span
+                                    >
                                   </label>
                                 </div>
-                                <div class="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-4">
-                                  {#each (o.orderNotes || []).filter(n => showDeletedOrderItems || !n.deletedAt) as note}
-                                    <div class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm {note.deletedAt ? 'opacity-40 grayscale' : ''}">
-                                      <div class="flex justify-between items-center mb-2">
-                                        <span class="text-[10px] font-black text-blue-600 uppercase">{note.createdBy}</span>
-                                        <span class="text-[9px] font-bold text-gray-300">{new Date(note.createdAt).toLocaleDateString()}</span>
+                                <div
+                                  class="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-4"
+                                >
+                                  {#each (o.orderNotes || []).filter((n) => showDeletedOrderItems || !n.deletedAt) as note}
+                                    <div
+                                      class="p-4 bg-white border border-gray-100 rounded-2xl shadow-sm {note.deletedAt
+                                        ? 'opacity-40 grayscale'
+                                        : ''}"
+                                    >
+                                      <div
+                                        class="flex justify-between items-center mb-2"
+                                      >
+                                        <span
+                                          class="text-[10px] font-black text-blue-600 uppercase"
+                                          >{note.createdBy}</span
+                                        >
+                                        <span
+                                          class="text-[9px] font-bold text-gray-300"
+                                          >{new Date(
+                                            note.createdAt,
+                                          ).toLocaleDateString()}</span
+                                        >
                                       </div>
-                                      <p class="text-xs font-medium text-gray-600 leading-relaxed">{note.note}</p>
+                                      <p
+                                        class="text-xs font-medium text-gray-600 leading-relaxed"
+                                      >
+                                        {note.note}
+                                      </p>
                                     </div>
                                   {:else}
-                                    <p class="text-xs text-gray-400 italic">No notes synced for this order.</p>
+                                    <p class="text-xs text-gray-400 italic">
+                                      No notes synced for this order.
+                                    </p>
                                   {/each}
                                 </div>
                               </div>
@@ -1145,14 +1359,16 @@
           <!-- Chat Log Panel -->
           <div class="flex flex-col lg:flex-row gap-8 h-[calc(100vh-280px)]">
             <!-- Left: Conversations -->
-            <div class="w-full lg:w-96 flex flex-col gap-6 bg-white border border-gray-200 rounded-[2.5rem] p-6 shadow-xl shadow-gray-200/50">
+            <div
+              class="w-full lg:w-96 flex flex-col gap-6 bg-white border border-gray-200 rounded-[2.5rem] p-6 shadow-xl shadow-gray-200/50"
+            >
               <div class="flex items-center justify-between mb-2 px-2">
                 <h2 class="font-black text-gray-900">Conversations</h2>
               </div>
-              
+
               <div class="relative">
-                <select 
-                  bind:value={chatStoreFilter} 
+                <select
+                  bind:value={chatStoreFilter}
                   onchange={loadConversations}
                   class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
                 >
@@ -1161,39 +1377,74 @@
                     <option value={r.slug}>{r.name}</option>
                   {/each}
                 </select>
-                <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                <div
+                  class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400"
+                >
                   <Globe size={16} />
                 </div>
               </div>
 
-              <div class="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2">
+              <div
+                class="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2"
+              >
                 {#if isLoadingConversations}
-                  <div class="py-12 text-center text-gray-400 font-bold text-sm">Loading chat log...</div>
+                  <div
+                    class="py-12 text-center text-gray-400 font-bold text-sm"
+                  >
+                    Loading chat log...
+                  </div>
                 {:else if conversations.length === 0}
-                  <div class="py-12 text-center text-gray-400 font-bold text-sm">No conversations yet.</div>
+                  <div
+                    class="py-12 text-center text-gray-400 font-bold text-sm"
+                  >
+                    No conversations yet.
+                  </div>
                 {:else}
                   {#each conversations as conv}
-                    <button 
+                    <button
                       onclick={() => selectConversation(conv)}
-                      class="w-full text-left p-5 rounded-2xl transition-all border {selectedConv?.id === conv.id ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white border-gray-100 hover:border-blue-500 group'}"
+                      class="w-full text-left p-5 rounded-2xl transition-all border {selectedConv?.id ===
+                      conv.id
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20'
+                        : 'bg-white border-gray-100 hover:border-blue-500 group'}"
                     >
                       <div class="flex justify-between items-start mb-2">
-                        <div class="font-black truncate flex-1 mr-2">{conv.buyerName || conv.buyerRef}</div>
+                        <div class="font-black truncate flex-1 mr-2">
+                          {conv.buyerName || conv.buyerRef}
+                        </div>
                         <div class="text-[10px] opacity-60 font-bold shrink-0">
-                          {new Date(conv.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(conv.updatedAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
                         </div>
                       </div>
                       <div class="text-xs opacity-80 truncate mb-3">
-                        {conv.lastMessage || 'No messages yet'}
+                        {conv.lastMessage || "No messages yet"}
                       </div>
                       <div class="flex items-center gap-2">
-                        <span class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full {selectedConv?.id === conv.id ? 'bg-white/20' : 'bg-gray-100 group-hover:bg-blue-50 text-gray-400 group-hover:text-blue-600'}">
+                        <span
+                          class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full {selectedConv?.id ===
+                          conv.id
+                            ? 'bg-white/20'
+                            : 'bg-gray-100 group-hover:bg-blue-50 text-gray-400 group-hover:text-blue-600'}"
+                        >
                           {conv.storeSlug}
                         </span>
-                        {#if conv.mode === 'human'}
-                          <span class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full {selectedConv?.id === conv.id ? 'bg-white/20' : 'bg-blue-100 text-blue-600'}">Human</span>
+                        {#if conv.mode === "human"}
+                          <span
+                            class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full {selectedConv?.id ===
+                            conv.id
+                              ? 'bg-white/20'
+                              : 'bg-blue-100 text-blue-600'}">Human</span
+                          >
                         {:else}
-                          <span class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full {selectedConv?.id === conv.id ? 'bg-white/20' : 'bg-purple-100 text-purple-600'}">AI</span>
+                          <span
+                            class="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full {selectedConv?.id ===
+                            conv.id
+                              ? 'bg-white/20'
+                              : 'bg-purple-100 text-purple-600'}">AI</span
+                          >
                         {/if}
                       </div>
                     </button>
@@ -1203,27 +1454,51 @@
             </div>
 
             <!-- Right: Message Thread -->
-            <div class="flex-1 flex flex-col bg-white border border-gray-200 rounded-[2.5rem] shadow-xl shadow-gray-200/50 overflow-hidden relative">
+            <div
+              class="flex-1 flex flex-col bg-white border border-gray-200 rounded-[2.5rem] shadow-xl shadow-gray-200/50 overflow-hidden relative"
+            >
               {#if !selectedConv}
-                <div class="flex-1 flex flex-col items-center justify-center text-gray-300 gap-6">
-                  <div class="w-24 h-24 bg-gray-50 rounded-[2.5rem] flex items-center justify-center text-gray-100 shadow-inner">
+                <div
+                  class="flex-1 flex flex-col items-center justify-center text-gray-300 gap-6"
+                >
+                  <div
+                    class="w-24 h-24 bg-gray-50 rounded-[2.5rem] flex items-center justify-center text-gray-100 shadow-inner"
+                  >
                     <MessageSquare size={48} />
                   </div>
-                  <p class="font-black text-xl">Select a session to view the log</p>
+                  <p class="font-black text-xl">
+                    Select a session to view the log
+                  </p>
                 </div>
               {:else}
                 <!-- Thread Header -->
-                <div class="px-10 py-8 border-b border-gray-50 flex items-center justify-between bg-gray-50/30">
+                <div
+                  class="px-10 py-8 border-b border-gray-50 flex items-center justify-between bg-gray-50/30"
+                >
                   <div class="flex items-center gap-6">
-                    <div class="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center text-xl font-black shadow-lg">
-                      {(selectedConv.buyerName || selectedConv.buyerRef).charAt(0).toUpperCase()}
+                    <div
+                      class="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center text-xl font-black shadow-lg"
+                    >
+                      {(selectedConv.buyerName || selectedConv.buyerRef)
+                        .charAt(0)
+                        .toUpperCase()}
                     </div>
                     <div>
-                      <h3 class="text-xl font-black text-gray-900 tracking-tight">{selectedConv.buyerName || selectedConv.buyerRef}</h3>
+                      <h3
+                        class="text-xl font-black text-gray-900 tracking-tight"
+                      >
+                        {selectedConv.buyerName || selectedConv.buyerRef}
+                      </h3>
                       <div class="flex items-center gap-3 mt-0.5">
-                        <span class="text-xs font-bold text-gray-400 uppercase tracking-widest">ID: {selectedConv.buyerRef}</span>
+                        <span
+                          class="text-xs font-bold text-gray-400 uppercase tracking-widest"
+                          >ID: {selectedConv.buyerRef}</span
+                        >
                         <span class="w-1 h-1 rounded-full bg-gray-200"></span>
-                        <span class="text-xs font-bold text-blue-600 uppercase tracking-widest">{selectedConv.storeSlug}</span>
+                        <span
+                          class="text-xs font-bold text-blue-600 uppercase tracking-widest"
+                          >{selectedConv.storeSlug}</span
+                        >
                       </div>
                     </div>
                   </div>
@@ -1422,14 +1697,14 @@
                     Platform Key Issued
                   </div>
                   <p
-                    class="text-emerald-700/80 font-bold text-lg mb-6 leading-relaxed"
+                    class="text-emerald-700/80 font-bold text-sm mb-6 leading-relaxed"
                   >
                     Share this key with the retailer. It will <strong
                       class="text-emerald-900 font-black">not</strong
                     > be shown again.
                   </p>
                   <div
-                    class="font-mono bg-white text-emerald-900 px-8 py-5 rounded-2xl text-lg font-black border border-emerald-200 shadow-inner break-all"
+                    class="font-mono bg-white text-emerald-900 px-8 py-5 rounded-2xl text-sm font-black border border-emerald-200 shadow-inner break-all"
                   >
                     {issuedKey}
                   </div>
@@ -1478,7 +1753,7 @@
                           <Loader2
                             class="w-12 h-12 animate-spin mx-auto mb-6 text-blue-600"
                           />
-                          <span class="font-bold text-lg"
+                          <span class="font-bold text-sm"
                             >Retreiving regional retail registry...</span
                           >
                         </td>
@@ -1700,7 +1975,7 @@
       >
         {confirmTitle}
       </h2>
-      <p class="text-gray-500 font-medium text-lg mb-10 leading-relaxed">
+      <p class="text-gray-500 font-medium text-sm mb-10 leading-relaxed">
         {confirmDesc}
       </p>
 
