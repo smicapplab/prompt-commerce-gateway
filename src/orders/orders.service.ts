@@ -22,7 +22,7 @@ export class OrdersService {
     if (!retailer) throw new Error(`Retailer ${slug} not found`);
 
     return this.prisma.$transaction(async (tx) => {
-      // 1. Sync Orders (Payments)
+      // 1. Sync Orders (Mirror to Payment model)
       const orderIds = orders.map((o: any) => o.id);
       const existingPayments = await tx.payment.findMany({
         where: { storeSlug: slug, orderId: { in: orderIds } }
@@ -30,13 +30,33 @@ export class OrdersService {
       const existingMap = new Map(existingPayments.map(p => [p.orderId, p]));
 
       for (const o of orders) {
-        const existing = existingMap.get(o.id);
+        let payment = existingMap.get(o.id);
 
-        if (existing) {
-          const statusChanged = existing.orderStatus !== o.status;
+        if (!payment) {
+          // If the order exists in seller SQLite but not in gateway (e.g. manual entry),
+          // we can create a placeholder payment record if we have a buyerRef (chatId).
+          if (o.buyer_ref && /^\d+$/.test(o.buyer_ref)) {
+            payment = await tx.payment.create({
+              data: {
+                referenceId: `manual-${slug}-${o.id}`,
+                storeSlug:   slug,
+                orderId:     o.id,
+                buyerRef:    o.buyer_ref,
+                amount:      o.total || 0,
+                provider:    o.payment_provider || 'manual',
+                status:      o.status === 'paid' ? 'paid' : 'pending',
+                orderStatus: o.status,
+              }
+            });
+            existingMap.set(o.id, payment);
+          } else {
+            continue; // Cannot mirror without a valid Telegram chatId
+          }
+        } else {
+          const statusChanged = payment.orderStatus !== o.status;
           
           await tx.payment.update({
-            where: { id: existing.id },
+            where: { id: payment.id },
             data: {
               orderStatus:         o.status,
               deliveryType:        o.delivery_type,
@@ -51,9 +71,8 @@ export class OrdersService {
           });
 
           if (statusChanged) {
-            // Fire-and-forget notification
             this.telegram.notifyOrderStatusChange({
-              chatId:              existing.buyerRef,
+              chatId:              payment.buyerRef,
               orderId:             o.id,
               storeName:           retailer.name,
               newStatus:           o.status,
@@ -67,60 +86,77 @@ export class OrdersService {
         }
       }
 
-      // 2. Sync Notes — reuse existingMap (already keyed by orderId) to avoid N+1
+      // 2. Sync Notes
       for (const n of orderNotes) {
         const payment = existingMap.get(n.order_id);
         if (!payment) continue;
 
-        await tx.orderNote.upsert({
-          where: { id: n.id }, // Assuming IDs are stable or we need a composite key
-          create: {
-            id:        n.id,
-            paymentId: payment.id,
-            note:      n.note,
-            createdBy: n.created_by,
-            createdAt: new Date(n.created_at),
-            deletedAt: n.deleted_at ? new Date(n.deleted_at) : null,
-            deletedBy: n.deleted_by,
-          },
-          update: {
-            note:      n.note,
-            deletedAt: n.deleted_at ? new Date(n.deleted_at) : null,
-            deletedBy: n.deleted_by,
-          }
-        });
+        const noteWhere = { paymentId: payment.id, sellerId: Number(n.id) };
+        const existingNote = await tx.orderNote.findFirst({ where: noteWhere });
+
+        if (existingNote) {
+          await tx.orderNote.update({
+            where: { id: existingNote.id },
+            data: {
+              note:      n.note,
+              deletedAt: n.deleted_at ? new Date(n.deleted_at) : null,
+              deletedBy: n.deleted_by,
+            }
+          });
+        } else {
+          await tx.orderNote.create({
+            data: {
+              sellerId:  Number(n.id),
+              paymentId: payment.id,
+              note:      n.note,
+              createdBy: n.created_by,
+              createdAt: new Date(n.created_at),
+              deletedAt: n.deleted_at ? new Date(n.deleted_at) : null,
+              deletedBy: n.deleted_by,
+            }
+          });
+        }
       }
 
-      // 3. Sync Files — reuse existingMap to avoid N+1
+      // 3. Sync Files
       for (const f of orderFiles) {
         const payment = existingMap.get(f.order_id);
         if (!payment) continue;
 
-        await tx.orderFile.upsert({
-          where: { id: f.id },
-          create: {
-            id:           f.id,
-            paymentId:    payment.id,
-            filename:     f.filename,
-            originalName: f.original_name,
-            fileUrl:      f.file_url,
-            mimeType:     f.mime_type,
-            sizeBytes:    f.size_bytes,
-            uploadedBy:   f.uploaded_by,
-            uploadedAt:   new Date(f.uploaded_at),
-            deletedAt:    f.deleted_at ? new Date(f.deleted_at) : null,
-            deletedBy:    f.deleted_by,
-          },
-          update: {
-            deletedAt:    f.deleted_at ? new Date(f.deleted_at) : null,
-            deletedBy:    f.deleted_by,
-          }
-        });
+        const fileWhere = { paymentId: payment.id, sellerId: Number(f.id) };
+        const existingFile = await tx.orderFile.findFirst({ where: fileWhere });
+
+        if (existingFile) {
+          await tx.orderFile.update({
+            where: { id: existingFile.id },
+            data: {
+              deletedAt: f.deleted_at ? new Date(f.deleted_at) : null,
+              deletedBy: f.deleted_by,
+            }
+          });
+        } else {
+          await tx.orderFile.create({
+            data: {
+              sellerId:     Number(f.id),
+              paymentId:    payment.id,
+              filename:     f.filename,
+              originalName: f.original_name,
+              fileUrl:      f.file_url,
+              mimeType:     f.mime_type,
+              sizeBytes:    f.size_bytes,
+              uploadedBy:   f.uploaded_by,
+              uploadedAt:   new Date(f.uploaded_at),
+              deletedAt:    f.deleted_at ? new Date(f.deleted_at) : null,
+              deletedBy:    f.deleted_by,
+            }
+          });
+        }
       }
 
       return { success: true };
     });
   }
+
 
   async list(filters: {
     store?: string;

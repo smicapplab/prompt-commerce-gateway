@@ -3,6 +3,7 @@
 
 model OrderNote {
   id        Int       @id @default(autoincrement())
+  sellerId  Int       @map("seller_id")
   paymentId Int       @map("payment_id")
   note      String
   createdBy String    @map("created_by")
@@ -10,18 +11,20 @@ model OrderNote {
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
 
-  payment   Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
+  @@unique([paymentId, sellerId])
   @@index([paymentId])
   @@map("order_notes")
 }
 
 model OrderFile {
   id           Int       @id @default(autoincrement())
+  sellerId     Int       @map("seller_id")
   paymentId    Int       @map("payment_id")
   filename     String
   originalName String    @map("original_name")
-  fileUrl      String    @map("file_url")    // absolute URL from seller
+  fileUrl      String    @map("file_url") // absolute URL from seller
   mimeType     String    @map("mime_type")
   sizeBytes    Int       @map("size_bytes")
   uploadedBy   String    @map("uploaded_by")
@@ -29,8 +32,9 @@ model OrderFile {
   deletedAt    DateTime? @map("deleted_at")
   deletedBy    String?   @map("deleted_by")
 
-  payment      Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
+  @@unique([paymentId, sellerId])
   @@index([paymentId])
   @@map("order_files")
 }

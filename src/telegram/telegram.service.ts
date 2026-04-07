@@ -23,9 +23,17 @@ const PAGE_SIZE = 8;
 // ─── Checkout session state ───────────────────────────────────────────────────
 interface CheckoutState {
   storeSlug:     string;
-  step:          'name' | 'email' | 'address' | 'delivery' | 'payment' | 'confirm';
+  step:          'name' | 'email' | 'addressList' | 'provSelect' | 'citySelect' | 'brgySelect' | 'streetType' | 'labelType' | 'address' | 'delivery' | 'payment' | 'confirm';
   name?:         string;
   email?:        string;
+  
+  // New address flow state
+  provCode?:     string;
+  cityCode?:     string;
+  brgyCode?:     string;
+  streetLine?:   string;
+  addressId?:    number;
+
   address?:      string;
   deliveryType?: 'delivery' | 'pickup';
   paymentMethod?: string;  // e.g. 'cod', 'mock', 'assisted', 'paymongo', 'stripe'
@@ -394,6 +402,91 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           await this.showOrderSummary(ctx, userId, slug, state, true, retailer);
           return;
         }
+        // addr:
+        if (data.startsWith('addr:')) {
+          const action = data.slice(5);
+          const state = this.checkoutSessions.get(userId);
+          if (!state) return;
+          if (action === 'new') {
+            state.step = 'provSelect';
+            this.checkoutSessions.set(userId, state);
+            await ctx.editMessageText('📍 Great! Let\'s setup a new address. Please type your province (or region):');
+            return;
+          }
+          // Select existing
+          const id = parseInt(action);
+          const addr = await this.prisma.telegramAddress.findUnique({ where: { id } });
+          if (addr && addr.userId === userId) {
+            state.addressId = id;
+            state.address = `${addr.streetLine}, ${addr.city}, ${addr.province}`;
+            
+            const retailer = await this.getRetailer(state.storeSlug);
+            if (retailer.allowsPickup) {
+              state.step = 'delivery';
+              const deliveryKb = new InlineKeyboard()
+                .text('🏠 Home Delivery', `delivery:delivery:${state.storeSlug}`)
+                .text('🏪 Store Pickup',  `delivery:pickup:${state.storeSlug}`);
+              await ctx.editMessageText('🚚 How would you like to receive your order?', { reply_markup: deliveryKb });
+            } else {
+              state.step = 'payment';
+              state.deliveryType = 'delivery';
+              await ctx.deleteMessage().catch(() => {});
+              await this.showPaymentSelection(ctx, state.storeSlug, retailer);
+            }
+            this.checkoutSessions.set(userId, state);
+          }
+          return;
+        }
+        
+        // prov:
+        if (data.startsWith('prov:')) {
+          const code = data.slice(5);
+          const state = this.checkoutSessions.get(userId);
+          if (state?.step === 'provSelect') {
+            state.provCode = code;
+            state.step = 'citySelect';
+            this.checkoutSessions.set(userId, state);
+            await ctx.editMessageText('🏢 Got it! Now, please type your city or municipality (e.g. "Makati", "Cebu City"):');
+          }
+          return;
+        }
+
+        // city:
+        if (data.startsWith('city:')) {
+          const code = data.slice(5);
+          const state = this.checkoutSessions.get(userId);
+          if (state?.step === 'citySelect') {
+            state.cityCode = code;
+            state.step = 'brgySelect';
+            this.checkoutSessions.set(userId, state);
+            await ctx.editMessageText('🏘 Almost there! Please type your barangay:');
+          }
+          return;
+        }
+
+        // brgy:
+        if (data.startsWith('brgy:')) {
+          const code = data.slice(5);
+          const state = this.checkoutSessions.get(userId);
+          if (state?.step === 'brgySelect') {
+            state.brgyCode = code;
+            state.step = 'streetType';
+            this.checkoutSessions.set(userId, state);
+            await ctx.editMessageText('🏠 Please type your full street address (e.g. "Unit 12A, Tower 1, Avida Towers, Juan St."):');
+          }
+          return;
+        }
+
+        // lbl:
+        if (data.startsWith('lbl:')) {
+          const lbl = data.slice(4);
+          const state = this.checkoutSessions.get(userId);
+          if (state?.step === 'labelType') {
+            await this.saveAndApplyAddress(ctx, userId, state, lbl === 'skip' ? '' : lbl, true);
+          }
+          return;
+        }
+
         // c:<slug>:<catId> — products in category
         if (data.startsWith('c:')) {
           const parts = data.split(':');
@@ -601,7 +694,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const { results, total, parsed, fallback } = await this.catalog.smartSearch(rawQuery, { limit: PAGE, offset });
     const { keywords, maxPrice, minPrice, inStockOnly } = parsed;
 
-    // ── Build header ────────────────────────────────────────────────────────
+    // ── Build header label ───────────────────────────────────────────────────
     const ph = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
     const filters: string[] = [];
     if (keywords)                 filters.push(`<b>${esc(keywords)}</b>`);
@@ -612,6 +705,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (inStockOnly)              filters.push('in stock');
 
     const label = filters.length ? filters.join(' · ') : 'all products';
+    const fallbackNote = fallback ? `\n<i>💡 No exact matches — showing similar results</i>` : '';
 
     if (!results.length && offset === 0) {
       const msg = `🔍 No products found for ${label}.\n\nTry a different keyword or browse by /stores.`;
@@ -620,33 +714,92 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const hasAnyImages = results.some((p: any) => p.images?.length > 0);
-    const fallbackNote = fallback ? `\n<i>💡 No exact matches — showing similar results</i>` : '';
+    // Cart context for shortcut button
+    const cartSlug = userId
+      ? (this.aiSessions.get(userId)?.storeSlug ?? this.lastStoreSlug.get(userId))
+      : undefined;
 
-    const lines: string[] = [
-      `🔍 ${label} — ${total} result${total !== 1 ? 's' : ''} across all stores${fallbackNote}\n`,
-    ];
-
-    // if (hasAnyImages) lines.push('\n<i>📷 = has photo — tap product to view</i>');
-
-    // Pagination + product buttons keyboard
-    const keyboard = new InlineKeyboard();
     const hasPrev = offset > 0;
     const hasNext = offset + PAGE < total;
+
+    // ── Rich photo card mode ──────────────────────────────────────────────────
+    // When any product has an image and this is a fresh send (not an edit),
+    // display each product as an individual photo message for an e-commerce feel.
+    const productsWithImages = results.filter((p: any) => p.images?.length > 0);
+    const usePhotoCards = !edit && productsWithImages.length > 0;
+
+    if (usePhotoCards) {
+      // Header message
+      await ctx.reply(
+        `🛍 <b>Search results:</b> ${label}${fallbackNote}\n` +
+        `<i>${total} result${total !== 1 ? 's' : ''} across all stores</i>`,
+        { parse_mode: 'HTML' },
+      );
+
+      // One photo card per product
+      for (const p of results) {
+        const priceStr = p.price != null ? ph(p.price) : 'Price on request';
+        const stockBadge = p.stockQuantity === 0
+          ? '⚠️ <i>Out of stock</i>'
+          : `📦 ${p.stockQuantity} in stock`;
+
+        const caption = [
+          `<b>${esc(p.title)}</b>`,
+          `💰 <b>${priceStr}</b>`,
+          stockBadge,
+          `🏪 <i>${esc(p.storeSlug)}</i>`,
+        ].join('\n');
+
+        const cardKeyboard = new InlineKeyboard()
+          .text('🛒 Add to Cart', CB.qty(p.storeSlug, p.sellerId))
+          .text('📋 View Details', CB.prod(p.storeSlug, p.sellerId));
+
+        if (p.images?.length > 0) {
+          try {
+            await ctx.replyWithPhoto(p.images[0], {
+              caption,
+              parse_mode: 'HTML',
+              reply_markup: cardKeyboard,
+            });
+            continue;
+          } catch {
+            // Photo URL failed — fall through to text card below
+          }
+        }
+        // Text card fallback
+        await ctx.reply(caption, { parse_mode: 'HTML', reply_markup: cardKeyboard });
+      }
+
+      // Navigation footer
+      const navKeyboard = new InlineKeyboard();
+      if (hasPrev) navKeyboard.text('← Prev', `srch:${offset - PAGE}`);
+      if (hasNext) navKeyboard.text('Next →', `srch:${offset + PAGE}`);
+      if (cartSlug) {
+        if (hasPrev || hasNext) navKeyboard.row();
+        navKeyboard.text('🛍 View Cart', CB.cart(cartSlug));
+      }
+      if (hasPrev || hasNext || cartSlug) {
+        const pageLabel = hasPrev || hasNext
+          ? `Page ${Math.floor(offset / PAGE) + 1} of ${Math.ceil(total / PAGE)}`
+          : '─────────────';
+        await ctx.reply(pageLabel, { reply_markup: navKeyboard });
+      }
+      return;
+    }
+
+    // ── Fallback: compact text list (no images, or edit/pagination mode) ─────
+    const keyboard = new InlineKeyboard();
     if (hasPrev) keyboard.text('← Prev', `srch:${offset - PAGE}`);
     if (hasNext) keyboard.text('Next →', `srch:${offset + PAGE}`);
     if (hasPrev || hasNext) keyboard.row();
     for (const p of results) {
       const priceStr = p.price != null ? `₱${p.price.toLocaleString('en-PH', { minimumFractionDigits: 0 })}` : 'TBD';
-      keyboard.text(`${p.title.slice(0, 35)} (${priceStr})`, `p:${p.storeSlug}:${p.sellerId}`).row();
+      const stockMark = p.stockQuantity === 0 ? ' ⚠️' : '';
+      keyboard.text(`${p.title.slice(0, 33)}${stockMark} (${priceStr})`, `p:${p.storeSlug}:${p.sellerId}`).row();
     }
-    // Show View Cart shortcut if user has a known active store
-    const cartSlug = userId
-      ? (this.aiSessions.get(userId)?.storeSlug ?? this.lastStoreSlug.get(userId))
-      : undefined;
     if (cartSlug) keyboard.text('🛍 View Cart', CB.cart(cartSlug));
 
-    const text = lines.join('\n');
+    const text = `🔍 ${label} — ${total} result${total !== 1 ? 's' : ''} across all stores${fallbackNote}`;
     if (edit) {
       await this.safeEditText(ctx, text, { parse_mode: 'HTML', reply_markup: keyboard });
     } else {
@@ -931,8 +1084,53 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
       return;
     }
-    this.checkoutSessions.set(userId, { storeSlug: slug, step: 'name' });
-    await ctx.reply('🛍 <b>Checkout</b>\n\nWhat\'s your name?', { parse_mode: 'HTML' });
+
+    const user = await this.prisma.telegramUser.findUnique({
+      where: { id: userId },
+      include: { addresses: true },
+    });
+
+    const isMissingProfile = !user?.savedFirstName || !user?.savedEmail;
+
+    if (isMissingProfile) {
+      this.checkoutSessions.set(userId, { storeSlug: slug, step: 'name' });
+      await ctx.reply('🛍 <b>Checkout</b>\n\nWhat\'s your first and last name?', { parse_mode: 'HTML' });
+      return;
+    }
+
+    // Prefill name & email and prompt for address
+    const fullName = `${user.savedFirstName} ${user.savedLastName || ''}`.trim();
+    const state: CheckoutState = {
+      storeSlug: slug,
+      step: 'addressList',
+      name: fullName,
+      email: user.savedEmail || undefined,
+    };
+    this.checkoutSessions.set(userId, state);
+
+    await this.promptAddressSelection(ctx, userId, user.addresses);
+  }
+
+  private async promptAddressSelection(ctx: any, userId: string, addresses: any[] = []): Promise<void> {
+    const kb = new InlineKeyboard();
+    
+    // Sort so default is on top
+    const sorted = [...addresses].sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+    
+    // Show top 4 saved addresses
+    for (const addr of sorted.slice(0, 4)) {
+      const labelBadge = addr.label ? `${addr.label} — ` : '';
+      const brief = `${labelBadge}${addr.streetLine}, ${addr.city}`.slice(0, 40);
+      kb.text(`📍 ${brief}`, `addr:${addr.id}`).row();
+    }
+    
+    kb.text('➕ Add New Address', 'addr:new').row();
+    kb.text('❌ Cancel Checkout', `cancel:${this.checkoutSessions.get(userId)?.storeSlug}`);
+
+    await ctx.reply('🏠 <b>Delivery Address</b>\n\nWhere should we deliver your order?', {
+      parse_mode: 'HTML',
+      reply_markup: kb,
+    });
   }
 
   private async handleCheckoutInput(
@@ -964,13 +1162,95 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       state.email = trimmed;
-      state.step = 'address';
+      state.step = 'addressList';
       this.checkoutSessions.set(userId, state);
-      await ctx.reply('🏠 What\'s your delivery address?');
+      
+      const user = await this.prisma.telegramUser.findUnique({ where: { id: userId }, include: { addresses: true } });
+      await this.promptAddressSelection(ctx, userId, user?.addresses || []);
+      return;
+    }
+
+    if (state.step === 'provSelect') {
+      const q = text.trim();
+      if (q.length < 2) {
+        await ctx.reply('⚠️ Type at least 2 letters to search.');
+        return;
+      }
+      const provinces = await this.prisma.phProvince.findMany({
+        where: { name: { contains: q, mode: 'insensitive' } },
+        take: 10,
+      });
+      if (!provinces.length) {
+        await ctx.reply('🔍 No provinces found. Try another spelling.');
+        return;
+      }
+      const kb = new InlineKeyboard();
+      for (const p of provinces) kb.text(p.name, `prov:${p.code}`).row();
+      await ctx.reply('📍 <b>Select your province:</b>', { parse_mode: 'HTML', reply_markup: kb });
+      return;
+    }
+
+    if (state.step === 'citySelect') {
+      const q = text.trim();
+      if (q.length < 2) {
+        await ctx.reply('⚠️ Type at least 2 letters to search.');
+        return;
+      }
+      const cities = await this.prisma.phCity.findMany({
+        where: { provinceCode: state.provCode, name: { contains: q, mode: 'insensitive' } },
+        take: 10,
+      });
+      if (!cities.length) {
+        await ctx.reply('🔍 No cities found for that name. Try again.');
+        return;
+      }
+      const kb = new InlineKeyboard();
+      for (const c of cities) kb.text(c.name, `city:${c.code}`).row();
+      await ctx.reply('🏢 <b>Select your city/municipality:</b>', { parse_mode: 'HTML', reply_markup: kb });
+      return;
+    }
+
+    if (state.step === 'brgySelect') {
+      const q = text.trim();
+      if (q.length < 2) {
+        await ctx.reply('⚠️ Type at least 2 letters to search.');
+        return;
+      }
+      const brgys = await this.prisma.phBarangay.findMany({
+        where: { cityCode: state.cityCode, name: { contains: q, mode: 'insensitive' } },
+        take: 10,
+      });
+      if (!brgys.length) {
+        await ctx.reply('🔍 No barangays found. Try again or type "skip" if not applicable.');
+        return;
+      }
+      const kb = new InlineKeyboard();
+      for (const b of brgys) kb.text(b.name, `brgy:${b.code}`).row();
+      await ctx.reply('🏘 <b>Select your barangay:</b>', { parse_mode: 'HTML', reply_markup: kb });
+      return;
+    }
+
+    if (state.step === 'streetType') {
+      const trimmed = text.trim();
+      state.streetLine = trimmed;
+      state.step = 'labelType';
+      this.checkoutSessions.set(userId, state);
+      
+      const kb = new InlineKeyboard()
+        .text('🏠 Home', 'lbl:Home')
+        .text('🏢 Office', 'lbl:Office').row()
+        .text('❌ Don\'t save, just use once', 'lbl:skip');
+      await ctx.reply('💾 <b>Save Address As:</b>\n\nChoose a label, or type your own custom label (e.g. "Condo").', { parse_mode: 'HTML', reply_markup: kb });
+      return;
+    }
+
+    if (state.step === 'labelType') {
+      await this.saveAndApplyAddress(ctx, userId, state, text.trim());
       return;
     }
 
     if (state.step === 'address') {
+      // Legacy simple text address
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 300) {
         await ctx.reply('⚠️ Please enter a valid address (1–300 characters).');
@@ -997,6 +1277,50 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.showPaymentSelection(ctx, storeSlug, retailer);
       return;
     }
+  }
+
+  private async saveAndApplyAddress(ctx: any, userId: string, state: CheckoutState, label: string, isEdit = false): Promise<void> {
+    const prov = await this.prisma.phProvince.findUnique({ where: { code: state.provCode! } });
+    const city = await this.prisma.phCity.findUnique({ where: { code: state.cityCode! } });
+    const brgy = await this.prisma.phBarangay.findUnique({ where: { code: state.brgyCode! } });
+    
+    // Save to DB if labeling
+    if (label) {
+      const addressRecord = await this.prisma.telegramAddress.create({
+        data: {
+          userId: userId,
+          label: label.slice(0, 50),
+          streetLine: state.streetLine!,
+          barangay: brgy?.name || '',
+          city: city?.name || '',
+          province: prov?.name || '',
+        }
+      });
+      state.addressId = addressRecord.id;
+    }
+    
+    state.address = [state.streetLine, brgy?.name, city?.name, prov?.name].filter(Boolean).join(', ');
+    
+    const retailer = await this.getRetailer(state.storeSlug);
+    if (retailer.allowsPickup) {
+      state.step = 'delivery';
+      this.checkoutSessions.set(userId, state);
+      
+      const deliveryKb = new InlineKeyboard()
+        .text('🏠 Home Delivery', `delivery:delivery:${state.storeSlug}`)
+        .text('🏪 Store Pickup',  `delivery:pickup:${state.storeSlug}`);
+        
+      const msg = '🚚 How would you like to receive your order?';
+      if (isEdit) await ctx.editMessageText(msg, { reply_markup: deliveryKb });
+      else await ctx.reply(msg, { reply_markup: deliveryKb });
+      return;
+    }
+
+    state.step = 'payment';
+    state.deliveryType = 'delivery';
+    this.checkoutSessions.set(userId, state);
+    if (isEdit) await ctx.deleteMessage().catch(() => {});
+    await this.showPaymentSelection(ctx, state.storeSlug, retailer);
   }
 
   private async showOrderSummary(ctx: any, userId: string, storeSlug: string, state: CheckoutState, isEdit = false, retailer?: any): Promise<void> {
@@ -1152,10 +1476,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.cartService.clear(userId, slug);
       this.checkoutSessions.delete(userId);
       
-      // Update last order timestamp in DB
+      // Update last order timestamp and save profile details
+      const nameParts = state.name?.split(' ') || [];
+      const fName = nameParts[0] || '';
+      const lName = nameParts.slice(1).join(' ') || '';
+      
       await this.prisma.telegramUser.update({
         where: { id: userId },
-        data: { lastOrderAt: new Date() },
+        data: { 
+          lastOrderAt: new Date(),
+          savedFirstName: fName,
+          savedLastName: lName,
+          savedEmail: state.email,
+        },
       });
 
       // ── Notify seller of new order ────────────────────────────────────────
@@ -1313,6 +1646,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ─── Notify user of order status change (called by OrdersService sync) ───────
+  // ─── Notify user of order status change (called by OrdersService sync) ───────
   async notifyOrderStatusChange(params: {
     chatId: string;
     orderId: number;
@@ -1328,28 +1662,29 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const { chatId, orderId, storeName, newStatus } = params;
 
     const templates: Record<string, string> = {
-      pending_payment: `✅ Order confirmed — payment instructions:\n\n${params.paymentInstructions || 'Please coordinate payment with the store.'}`,
+      pending_payment: `✅ Order confirmed — payment instructions:\n\n${esc(params.paymentInstructions) || 'Please coordinate payment with the store.'}`,
       pending:         `✅ Order confirmed — payment received.`,
       paid:            `💳 Payment confirmed — your order is being prepared.`,
       picking:         `🗂 Your order is being picked.`,
       packing:         `📦 Your order is being packed.`,
-      in_transit:      `🚚 Your order is on its way!\n\nCourier: ${params.courierName || 'N/A'}\nTracking: ${params.trackingNumber || 'N/A'}${params.trackingUrl ? `\n[Track here](${params.trackingUrl})` : ''}`,
-      ready_for_pickup: `🏪 Your order is ready for pickup at ${storeName}!`,
+      in_transit:      `🚚 Your order is on its way!\n\n<b>Courier:</b> ${esc(params.courierName) || 'N/A'}\n<b>Tracking:</b> ${esc(params.trackingNumber) || 'N/A'}${params.trackingUrl ? `\n<a href="${esc(params.trackingUrl)}">Track here</a>` : ''}`,
+      ready_for_pickup: `🏪 Your order is ready for pickup at <b>${esc(storeName)}</b>!`,
       delivered:       `✅ Your order has been delivered!`,
       picked_up:       `✅ Your order has been picked up!`,
-      cancelled:       `❌ Your order has been cancelled.${params.cancellationReason ? `\nReason: ${params.cancellationReason}` : ''}`,
+      cancelled:       `❌ Your order has been cancelled.${params.cancellationReason ? `\n\n<b>Reason:</b> ${esc(params.cancellationReason)}` : ''}`,
       refunded:        `💸 Your order has been refunded.`,
     };
 
-    const text = templates[newStatus] || `Order #${orderId} status changed to ${newStatus.replace(/_/g, ' ')}.`;
-    const message = `*${esc(storeName)}*\nOrder #${orderId}\n\n${text}`;
+    const text = templates[newStatus] || `Order #${orderId} status changed to <b>${esc(newStatus.replace(/_/g, ' '))}</b>.`;
+    const message = `<b>${esc(storeName)}</b>\nOrder #${orderId}\n\n${text}`;
 
     try {
-      await this.bot.api.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+      await this.bot.api.sendMessage(chatId, message, { parse_mode: 'HTML' });
     } catch (err) {
       this.logger.error(`notifyOrderStatusChange failed for user ${chatId}: ${err}`);
     }
   }
+
 
   // ─── Notify user of payment status (called by WebhookController) ────────────
   async notifyPaymentStatus(params: {

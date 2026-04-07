@@ -1,0 +1,35 @@
+// ─── Philippine Geographic Data ────────────────────────────────────────────────
+// Static reference data for structured address validation and analytics.
+// Seeded from PSGC + PhilPost data.
+
+model PhProvince {
+  code   String   @id
+  name   String
+  cities PhCity[]
+
+  @@map("ph_provinces")
+}
+
+model PhCity {
+  code         String  @id
+  name         String
+  zipCode      String? @map("zip_code")
+  provinceCode String  @map("province_code")
+
+  province  PhProvince   @relation(fields: [provinceCode], references: [code], onDelete: Cascade)
+  barangays PhBarangay[]
+
+  @@index([provinceCode])
+  @@map("ph_cities")
+}
+
+model PhBarangay {
+  code     String @id
+  name     String
+  cityCode String @map("city_code")
+
+  city PhCity @relation(fields: [cityCode], references: [code], onDelete: Cascade)
+
+  @@index([cityCode])
+  @@map("ph_barangays")
+}

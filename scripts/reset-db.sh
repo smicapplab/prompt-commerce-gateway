@@ -96,6 +96,7 @@ npx prisma migrate reset --force
 # we explicitly run the seed command.
 echo -e "\n  ${B}▶ Ensuring database is seeded...${N}"
 npm run db:seed
+npx ts-node scripts/seed-ph-addresses.ts
 
 echo -e "\n  ${G}✔ Database reset and seeded successfully!${N}"
 echo ""

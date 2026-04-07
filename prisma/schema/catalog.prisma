@@ -11,9 +11,9 @@
 model CachedCategory {
   id        Int      @id @default(autoincrement())
   storeSlug String   @map("store_slug")
-  sellerId  Int      @map("seller_id")   // category ID in seller's SQLite DB
+  sellerId  Int      @map("seller_id") // category ID in seller's SQLite DB
   name      String
-  parentId  Int?     @map("parent_id")   // seller's parent category ID (not FK)
+  parentId  Int?     @map("parent_id") // seller's parent category ID (not FK)
   syncedAt  DateTime @default(now()) @map("synced_at")
 
   @@unique([storeSlug, sellerId])
@@ -24,7 +24,7 @@ model CachedCategory {
 model CachedProduct {
   id            Int      @id @default(autoincrement())
   storeSlug     String   @map("store_slug")
-  sellerId      Int      @map("seller_id")   // product ID in seller's SQLite DB
+  sellerId      Int      @map("seller_id") // product ID in seller's SQLite DB
   title         String
   description   String?
   sku           String?

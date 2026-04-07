@@ -4,7 +4,7 @@
 // which exceed JavaScript's safe integer range.
 model Cart {
   id        Int      @id @default(autoincrement())
-  userId    String   @map("user_id")     // Telegram user ID as string
+  userId    String   @map("user_id") // Telegram user ID as string
   storeSlug String   @map("store_slug")
   productId Int      @map("product_id")
   title     String

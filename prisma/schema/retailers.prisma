@@ -50,8 +50,8 @@ model Retailer {
   // If set and non-empty, takes precedence over paymentProvider+allowCod for Telegram checkout.
   paymentMethods       String  @default("[]") @map("payment_methods")
 
-  platformKey PlatformKey?
-  auditLogs   AuditLog[]
+  platformKey   PlatformKey?
+  auditLogs     AuditLog[]
   conversations Conversation[]
 
   @@map("retailers")

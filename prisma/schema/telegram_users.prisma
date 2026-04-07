@@ -5,10 +5,34 @@ model TelegramUser {
   username        String?
   firstName       String?   @map("first_name")
   lastName        String?   @map("last_name")
+  savedFirstName  String?   @map("saved_first_name")
+  savedLastName   String?   @map("saved_last_name")
+  savedEmail      String?   @map("saved_email")
   lastOrderAt     DateTime? @map("last_order_at")
   lastSearchQuery String?   @map("last_search_query")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
+  addresses TelegramAddress[]
+
   @@map("telegram_users")
+}
+
+model TelegramAddress {
+  id         Int      @id @default(autoincrement())
+  userId     String   @map("user_id")
+  label      String
+  streetLine String   @map("street_line")
+  barangay   String?
+  city       String
+  province   String
+  postalCode String?  @map("postal_code")
+  country    String   @default("Philippines")
+  isDefault  Boolean  @default(false) @map("is_default")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user TelegramUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("telegram_addresses")
 }

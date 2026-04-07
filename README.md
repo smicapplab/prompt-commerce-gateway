@@ -80,13 +80,17 @@ Cart items are stored in PostgreSQL (`carts` table) and survive gateway restarts
 
 ### Checkout & Order Flow
 
-- **Multi-step checkout in-bot**: customers provide name, email, and delivery address through a guided conversation.
-- **Payment Method Selection**: dynamically offers a choice of all enabled methods (COD, Mock, PayMongo, Stripe, Assisted) based on seller configuration.
-- **Dynamic Delivery Options**: supports both Home Delivery and Store Pickup based on seller settings.
-- **Input validation**: name (1–100 chars), email (RFC-compliant regex + 254-char max), address (1–300 chars).
-- **Order rate limiting**: atomic one-order-per-30-seconds guard per user to prevent double-submissions.
-- **Automated Customer Notifications**: buyers receive real-time Telegram updates for every status change.
-- **Robust Order Tracking**: full support for tracking numbers and courier links mirrored from the seller.
+- **Rich Search Results**: Products with images are returned as individual photo cards with prominent pricing and one-step action buttons (Add to Cart, Buy Now). Fallbacks to text lists for pagination or items lacking images.
+- **Smart Profile Extraction**: Seamless checkout flow automatically prefills the customer's name and email if they have ordered before, skipping redundant prompts.
+- **Structured Address Collection**: We utilize the **Philippine Geographic Data (PSGC)** to enforce a strictly-typed, multi-step geographic parsing flow:
+  - Text-based smart search dynamically filters `Provinces` → `Cities` → `Barangays`.
+  - Customers can save their addresses as "Home", "Office", etc. for 1-click checkouts on future orders.
+- **Payment Method Selection**: Dynamically offers a choice of all enabled methods (COD, Mock, PayMongo, Stripe, Assisted) based on seller configuration.
+- **Dynamic Delivery Options**: Supports both Home Delivery and Store Pickup based on seller settings.
+- **Input validation**: Name (1–100 chars), email (RFC-compliant regex + 254-char max), address (1–300 chars).
+- **Order rate limiting**: Atomic one-order-per-30-seconds guard per user to prevent double-submissions.
+- **Automated Customer Notifications**: Buyers receive real-time Telegram updates for every status change.
+- **Robust Order Tracking**: Full support for tracking numbers and courier links mirrored from the seller.
 
 ### Payment Integration (Universal Adapter)
 
@@ -188,6 +192,9 @@ cd prompt-commerce-gateway
 # First time only
 chmod +x scripts/setup-local.sh
 ./scripts/setup-local.sh     # creates .env, starts Docker Postgres, runs migrations, seeds admin
+
+# Fetch and seed the massive PSGC geographic database for checkout:
+npx ts-node scripts/seed-ph-addresses.ts
 
 # Start dev server
 ./scripts/dev.sh
