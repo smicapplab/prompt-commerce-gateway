@@ -11,8 +11,10 @@
   } from "lucide-svelte";
   import SearchBar from "$lib/components/SearchBar.svelte";
   import Header from "$lib/components/Header.svelte";
+  import { apiFetch } from "$lib/api";
+  import type { Store as StoreData } from "$shared/types";
 
-  let stores = $state<any[]>([]);
+  let stores = $state<StoreData[]>([]);
   let isLoading = $state(true);
   let searchQuery = $state("");
 
@@ -26,7 +28,7 @@
 
   onMount(async () => {
     try {
-      const res = await fetch("/api/storefront/stores");
+      const res = await apiFetch("/api/storefront/stores");
       if (res.ok) {
         stores = await res.json();
       }

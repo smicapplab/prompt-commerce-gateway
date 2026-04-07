@@ -5,12 +5,14 @@
   import ProductCard from "$lib/components/ProductCard.svelte";
   import SearchBar from "$lib/components/SearchBar.svelte";
   import Header from "$lib/components/Header.svelte";
+  import { apiFetch } from "$lib/api";
+  import type { Store, Category, Product } from "$shared/types";
 
   let slug = $derived($page.params.slug);
 
-  let store = $state<any>(null);
-  let categories = $state<any[]>([]);
-  let products = $state<any[]>([]);
+  let store = $state<Store | null>(null);
+  let categories = $state<Category[]>([]);
+  let products = $state<Product[]>([]);
   let isLoadingInfo = $state(true);
   let isLoadingProducts = $state(true);
 
@@ -23,8 +25,8 @@
     isLoadingInfo = true;
     try {
       const [storeRes, catsRes] = await Promise.all([
-        fetch(`/api/storefront/stores/${slug}`),
-        fetch(`/api/storefront/stores/${slug}/categories`),
+        apiFetch(`/api/storefront/stores/${slug}`),
+        apiFetch(`/api/storefront/stores/${slug}/categories`),
       ]);
       if (storeRes.ok) store = await storeRes.json();
       if (catsRes.ok) categories = await catsRes.json();
@@ -46,7 +48,7 @@
       if (selectedCategory) url += `&category=${selectedCategory}`;
       if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
 
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
         if (isLoadMore) {

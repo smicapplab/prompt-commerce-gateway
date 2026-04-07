@@ -9,7 +9,7 @@ const config = {
 			fallback: 'index.html' // Enables SPA mode
 		}),
 		alias: {
-			$prisma: '../src/generated/client'
+			$shared: '../shared',
 		},
 		prerender: {
 			entries: ['*'],

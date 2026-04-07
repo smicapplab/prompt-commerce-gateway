@@ -9,12 +9,13 @@
     ShieldCheck,
   } from "lucide-svelte";
   import Header from "$lib/components/Header.svelte";
+  import { apiFetch } from "$lib/api";
 
   let config = $state({ gatewayUrl: "https://gateway.example.com/sse" });
 
   onMount(async () => {
     try {
-      const res = await fetch("/api/storefront/config");
+      const res = await apiFetch("/api/storefront/config");
       if (res.ok) config = await res.json();
     } catch {}
   });

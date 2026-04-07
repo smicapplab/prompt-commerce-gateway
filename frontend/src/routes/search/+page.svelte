@@ -12,9 +12,11 @@
   import ProductCard from "$lib/components/ProductCard.svelte";
   import SearchBar from "$lib/components/SearchBar.svelte";
   import Header from "$lib/components/Header.svelte";
+  import { apiFetch } from "$lib/api";
+  import type { Product } from "$shared/types";
 
   let searchQuery = $state($page.url.searchParams.get("q") || "");
-  let products = $state<any[]>([]);
+  let products = $state<Product[]>([]);
   let isLoading = $state(false);
   let currentPage = $state(1);
   let hasMore = $state(false);
@@ -32,7 +34,7 @@
     if (!isLoadMore) currentPage = 1;
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/storefront/search?q=${encodeURIComponent(searchQuery)}&page=${currentPage}&limit=24`,
       );
       if (res.ok) {

@@ -22,8 +22,12 @@ async function bootstrap(): Promise<void> {
 
   // ── CORS ───────────────────────────────────────────────────────────────────
   // SEC-6: Restrict CORS to trusted origins
+  const allowedOrigins = process.env.CORS_ORIGINS 
+    ? process.env.CORS_ORIGINS.split(',') 
+    : ['http://localhost:3000', 'http://localhost:3002', 'https://your-seller-domain.com'];
+
   app.enableCors({
-    origin: ['http://localhost:3000', 'https://your-seller-domain.com'],
+    origin: allowedOrigins,
     credentials: true
   });
 

@@ -3,11 +3,13 @@
   import { onMount } from 'svelte';
   import { Loader2, ArrowLeft, Tag as TagIcon, CheckCircle2, XCircle, ShoppingBag, ChevronRight } from 'lucide-svelte';
   import Header from '$lib/components/Header.svelte';
+  import { apiFetch } from '$lib/api';
+  import type { Product, Store } from '$shared/types';
   
   let slug = $derived($page.params.slug);
   let id = $derived(Number($page.params.id));
-  let product = $state<any>(null);
-  let store = $state<any>(null);
+  let product = $state<Product | null>(null);
+  let store = $state<Store | null>(null);
   let isLoading = $state(true);
   let activeImageIndex = $state(0);
   let imageError = $state(false);
@@ -15,8 +17,8 @@
   onMount(async () => {
     try {
       const [prodRes, storeRes] = await Promise.all([
-        fetch(`/api/storefront/stores/${slug}/products/${id}`),
-        fetch(`/api/storefront/stores/${slug}`)
+        apiFetch(`/api/storefront/stores/${slug}/products/${id}`),
+        apiFetch(`/api/storefront/stores/${slug}`)
       ]);
       if (prodRes.ok) product = await prodRes.json();
       if (storeRes.ok) store = await storeRes.json();

@@ -2,6 +2,7 @@
   import { Loader2, Store, Upload, CheckCircle2, UserPlus, Info, ArrowRight } from "lucide-svelte";
   import { goto } from "$app/navigation";
   import Header from "$lib/components/Header.svelte";
+  import { apiFetch } from "$lib/api";
 
   let name = $state("");
   let slug = $state("");
@@ -49,7 +50,7 @@
         formData.append("businessPermit", fileList[0]);
       }
 
-      const res = await fetch("/api/register", {
+      const res = await apiFetch("/api/register", {
         method: "POST",
         body: formData,
       });
