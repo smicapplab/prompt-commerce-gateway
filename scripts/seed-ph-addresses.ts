@@ -37,22 +37,25 @@ async function main() {
 
     // 1. Seed Provinces
     console.log('Inserting provinces...');
-    await prisma.$transaction(
-      provinces.map((p: any) => prisma.phProvince.upsert({
+    const provinceOps = provinces.map((p: any) => 
+      prisma.phProvince.upsert({
         where: { code: p.code },
         update: { name: p.name },
         create: { code: p.code, name: p.name },
-      }))
+      })
     );
+    
+    const PROV_CHUNK = 50;
+    for (let i = 0; i < provinceOps.length; i += PROV_CHUNK) {
+      await prisma.$transaction(provinceOps.slice(i, i + PROV_CHUNK));
+    }
 
     // 2. Seed Cities
     console.log('Inserting cities...');
     const cityOps = [];
     for (const c of cities) {
-      // Both cities and municipalities might have a provinceCode.
-      // If none, it might be independent like in NCR, where we use regionCode.
       let pCode = c.provinceCode || (c.regionCode === '130000000' ? '130000000' : null);
-      if (!pCode) continue; // Skip if we can't link it
+      if (!pCode) continue;
 
       cityOps.push(
         prisma.phCity.upsert({
@@ -63,11 +66,9 @@ async function main() {
       );
     }
     
-    // Chunking the cities insertion
-    const CHUNK_SIZE = 100;
+    const CHUNK_SIZE = 50;
     for (let i = 0; i < cityOps.length; i += CHUNK_SIZE) {
-      const chunk = cityOps.slice(i, i + CHUNK_SIZE);
-      await prisma.$transaction(chunk);
+      await prisma.$transaction(cityOps.slice(i, i + CHUNK_SIZE));
     }
 
     // 3. Seed Barangays
@@ -76,7 +77,6 @@ async function main() {
     
     const bgyOps = [];
     for (const b of barangays) {
-      // It will have either cityCode or municipalityCode
       const cCode = b.cityCode || b.municipalityCode;
       if (!cCode || !validCityCodes.has(cCode)) continue;
       bgyOps.push(
@@ -89,8 +89,7 @@ async function main() {
     }
 
     for (let i = 0; i < bgyOps.length; i += CHUNK_SIZE) {
-      const chunk = bgyOps.slice(i, i + CHUNK_SIZE);
-      await prisma.$transaction(chunk);
+      await prisma.$transaction(bgyOps.slice(i, i + CHUNK_SIZE));
       if (i % 5000 === 0) console.log(`Inserted ${i} barangays...`);
     }
 
