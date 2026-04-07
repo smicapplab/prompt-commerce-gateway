@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger, Inject, Optional, forwardRef } from '@nestjs/common';
 import { PRISMA } from '../prisma/prisma.module';
 import type { PrismaClient } from '@prisma/client';
 import { RegistryService } from '../registry/registry.service';
@@ -36,9 +36,9 @@ export class WhatsAppService implements OnModuleInit {
     private readonly registry: RegistryService,
     private readonly settings: SettingsService,
     private readonly catalog: CatalogService,
-    private readonly aiChat: AiChatService,
-    private readonly cartService: CartService,
-    private readonly conversationService: ConversationService,
+    @Inject(forwardRef(() => AiChatService)) private readonly aiChat: AiChatService,
+    @Inject(forwardRef(() => CartService)) private readonly cartService: CartService,
+    @Inject(forwardRef(() => ConversationService)) private readonly conversationService: ConversationService,
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     private readonly client: WhatsAppClient,
     private readonly sessionService: WhatsAppSessionService,

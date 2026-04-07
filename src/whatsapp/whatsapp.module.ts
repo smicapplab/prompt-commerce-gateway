@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { RegistryModule } from '../registry/registry.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -17,8 +17,8 @@ import { WhatsAppSessionService } from './whatsapp-session.service';
     RegistryModule,
     SettingsModule,
     CatalogModule,
-    TelegramModule,
-    ChatModule,
+    forwardRef(() => TelegramModule),
+    forwardRef(() => ChatModule),
     PaymentModule,
   ],
   controllers: [WhatsAppController],
