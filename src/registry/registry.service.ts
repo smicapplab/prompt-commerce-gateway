@@ -30,8 +30,9 @@ export interface UpdateRetailerDto {
   aiModel?:        string | null;
   aiSystemPrompt?: string | null;
   serperApiKey?:   string | null;
-  // Telegram seller notifications
+  // Telegram and WhatsApp seller notifications
   telegramNotifyChatId?: string | null;
+  whatsappNotifyNumber?: string | null;
   // Payment gateway config
   paymentProvider?:      string | null;
   paymentApiKey?:        string | null;

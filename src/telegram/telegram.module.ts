@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TelegramService } from './telegram.service';
 import { AiChatService } from './ai-chat.service';
 import { CartService } from './cart.service';
@@ -9,8 +9,8 @@ import { PaymentModule } from '../payments/payment.module';
 import { ChatModule } from '../chat/chat.module';
 
 @Module({
-  imports:   [RegistryModule, SettingsModule, CatalogModule, PaymentModule, ChatModule],
+  imports:   [RegistryModule, SettingsModule, CatalogModule, PaymentModule, forwardRef(() => ChatModule)],
   providers: [TelegramService, AiChatService, CartService],
-  exports:   [TelegramService, CartService],
+  exports:   [TelegramService, CartService, AiChatService],
 })
 export class TelegramModule {}

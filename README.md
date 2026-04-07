@@ -24,14 +24,25 @@ prompt-commerce-gateway/
     telegram/       ← Telegram bot (grammy) + AI chat + persistent cart + order status notifications
     mcp/            ← retailer-client.ts — HTTP calls to seller MCP server
   frontend/
-    src/routes/
-      admin/        ← SvelteKit 5 admin dashboard (retailers, orders, payments, settings tabs)
-      stores/       ← Public web storefront (store directory, product grid, cross-store search)
+    src/
+      lib/
+        api.ts      ← apiFetch helper — respects VITE_API_BASE for decoupled deployments
+        components/
+          admin/    ← Modular admin components (AdminSidebar, RetailerList, OrderDashboard,
+                    ←   ChatLog, PaymentSettings, SystemSettings, LoginPanel)
+      routes/
+        admin/      ← SvelteKit 5 admin dashboard (retailers, orders, payments, settings tabs)
+        stores/     ← Public web storefront (store directory, product grid, cross-store search)
+  shared/
+    types.ts        ← Shared TypeScript interfaces used by both NestJS backend and SvelteKit frontend
   prisma/
     schema/         ← Split schema files (retailers, catalog, carts, payments, order-attachments, settings, admin)
 ```
 
-**Port:** 3002
+**Ports:**
+- `GATEWAY_PORT=3002` — NestJS API + serves built frontend (`scripts/run.sh` / PM2)
+- Port `3003` — Vite dev server only, proxies `/api/*` to NestJS at 3002 (`dev.sh`)
+
 **Database:** PostgreSQL (Docker in local dev, managed Postgres in production)
 
 ---
@@ -105,6 +116,20 @@ Sellers can enable any combination of payment providers simultaneously. The gate
 | **Stripe** | Hosted Checkout Sessions (cards, worldwide) |
 
 When a buyer selects Mock or any online provider, they receive a "💳 Pay Now" button linking to the payment page. COD and Assisted flows provide instructions inline.
+
+### Gateway Admin Dashboard
+
+A modular SvelteKit 5 admin panel composed of focused, independently maintainable components:
+
+| Component | Responsibility |
+|---|---|
+| `LoginPanel` | Auth form with JWT session management, idle timeout (1h), absolute limit (4h) |
+| `AdminSidebar` | Tab navigation with pending-retailer badge counter |
+| `RetailerList` | Filtered retailer table with verify / suspend / platform key actions |
+| `OrderDashboard` | Cross-network order ledger with stats, notes, fulfillment tracking |
+| `ChatLog` | Live conversation viewer with 5-second polling, mode switching, force-close |
+| `PaymentSettings` | Default payment provider config |
+| `SystemSettings` | Telegram bot token, webhook URL management |
 
 ### Network Order Dashboard (Admin Only)
 
@@ -184,6 +209,11 @@ dev.bat         # Windows
 
 `dev.sh` handles: Docker Postgres → Prisma migrations → `prisma generate` → both services.
 
+**URLs when running `dev.sh`:**
+- Seller Admin: `http://localhost:3000/admin`
+- Gateway API: `http://localhost:3002/api`
+- Gateway UI (Vite, with HMR): `http://localhost:3003`
+
 ### Gateway Only (standalone)
 
 ```bash
@@ -199,6 +229,8 @@ npx ts-node scripts/seed-ph-addresses.ts
 # Start dev server
 ./scripts/dev.sh
 ```
+
+**URL:** `http://localhost:3003` (Vite) proxies to NestJS at `http://localhost:3002`
 
 ---
 
@@ -261,6 +293,8 @@ chmod +x scripts/run.sh
 ```
 
 `run.sh` handles: `npm install` → `prisma generate` → `prisma migrate deploy` → build (API + frontend) → PM2 start/reload.
+
+After deployment, both the API and built frontend are served from a single NestJS process at **`http://localhost:3002`**.
 
 ### 3. Persist PM2 across reboots
 
@@ -339,19 +373,22 @@ PATCH  /api/retailers/:id       ← verify, issue key, suspend
 | Framework | NestJS |
 | Database | PostgreSQL via Prisma ORM |
 | Telegram bot | grammy |
+| Admin UI | SvelteKit 5 (Svelte 5 Runes) + Tailwind CSS |
+| Frontend types | Shared `shared/types.ts` — zero `any` in frontend |
 | AI (Claude) | `@anthropic-ai/sdk` |
 | AI (Gemini) | `@google/generative-ai` |
 | AI (OpenAI) | `openai` |
-| Auth | JWT (`@nestjs/jwt` + Passport) |
+| Auth | JWT (`@nestjs/jwt` + Passport), 1h idle / 4h absolute session limit |
 | Process manager | PM2 |
 
 ---
 
 ## Roadmap
 
+- [ ] **WhatsApp Business Bot** — Full parity with Telegram: search, cart, checkout, AI chat. Uses Meta Cloud API with webhook-based FSM session state.
 - [ ] **Vector / semantic search** — product embeddings via HuggingFace (`all-MiniLM-L6-v2`) stored in pgvector.
-- [ ] **Telegram webhook mode** — replace long-polling with proper webhooks for production.
-- [ ] **Web Storefront Cart & Checkout** — full shopping flow in the browser.
+- [x] **Telegram webhook mode** — supported alongside polling mode; configure URL via admin Settings tab.
+- [ ] **Web Storefront Cart & Checkout** — full shopping flow in the browser (currently Telegram-only).
 - [ ] **Multi-language bot responses**.
 
 ---

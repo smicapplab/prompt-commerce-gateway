@@ -3,7 +3,7 @@
   import { RotateCw } from "lucide-svelte";
   import Header from "$lib/components/Header.svelte";
   import { apiFetch } from "$lib/api";
-  import type { Retailer, AdminTabId, ApiFunction } from "$shared/types";
+  import type { Retailer, AdminTabId } from "$shared/types";
 
   // Admin Components
   import LoginPanel from "$lib/components/admin/LoginPanel.svelte";
@@ -36,7 +36,11 @@
   let confirmDesc = $state("");
   let onConfirmFn = $state<() => Promise<void>>(() => Promise.resolve());
 
-  function requireConfirm(title: string, desc: string, fn: () => Promise<void>) {
+  function requireConfirm(
+    title: string,
+    desc: string,
+    fn: () => Promise<void>,
+  ) {
     confirmTitle = title;
     confirmDesc = desc;
     onConfirmFn = fn;
@@ -68,13 +72,23 @@
       resetActivity();
     }
 
-    const activityEvents = ["mousedown", "mousemove", "keydown", "scroll", "touchstart"];
+    const activityEvents = [
+      "mousedown",
+      "mousemove",
+      "keydown",
+      "scroll",
+      "touchstart",
+    ];
     const handleActivity = () => resetActivity();
-    activityEvents.forEach((e) => window.addEventListener(e, handleActivity, { passive: true }));
+    activityEvents.forEach((e) =>
+      window.addEventListener(e, handleActivity, { passive: true }),
+    );
     activityTimeout = setInterval(checkActivity, 60000);
 
     return () => {
-      activityEvents.forEach((e) => window.removeEventListener(e, handleActivity));
+      activityEvents.forEach((e) =>
+        window.removeEventListener(e, handleActivity),
+      );
       clearInterval(activityTimeout);
     };
   });
@@ -95,7 +109,11 @@
     };
   }
 
-  async function api(method: string, path: string, body?: unknown): Promise<any> {
+  async function api(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<any> {
     const res = await apiFetch(path, {
       method,
       headers: authHeaders(),
@@ -131,7 +149,12 @@
 
   function switchTab(tab: typeof currentTab) {
     currentTab = tab;
-    if (tab !== "settings" && tab !== "payments" && tab !== "orders" && tab !== "chat") {
+    if (
+      tab !== "settings" &&
+      tab !== "payments" &&
+      tab !== "orders" &&
+      tab !== "chat"
+    ) {
       loadRetailers();
     }
   }
@@ -146,14 +169,20 @@
 {#if !isLoggedIn}
   <LoginPanel {onLoginSuccess} />
 {:else}
-  <div class="bg-gray-50 text-gray-900 flex h-[calc(100vh-5rem)] overflow-hidden font-sans">
+  <div
+    class="bg-gray-50 text-gray-900 flex h-[calc(100vh-5rem)] overflow-hidden font-sans"
+  >
     <AdminSidebar {currentTab} {switchTab} {retailers} {logout} />
 
-    <main class="flex-1 overflow-y-auto bg-gray-50/50 p-8 md:p-12 lg:p-16 relative">
+    <main
+      class="flex-1 overflow-y-auto bg-gray-50/50 p-8 md:p-12 lg:p-16 relative"
+    >
       <div class="max-w-7xl mx-auto">
         <header class="mb-12 flex items-center justify-between relative z-10">
           <div>
-            <h1 class="text-2xl lg:text-3xl font-black text-gray-900 tracking-tight leading-tight">
+            <h1
+              class="text-2xl lg:text-3xl font-black text-gray-900 tracking-tight leading-tight"
+            >
               {currentTab === "pending"
                 ? "Pending Verification"
                 : currentTab === "verified"
@@ -184,7 +213,9 @@
               onclick={loadRetailers}
               class="p-3 bg-white border border-gray-200 rounded-2xl text-gray-400 hover:text-gray-900 transition-all shadow-sm hover:shadow-lg active:scale-90"
             >
-              <RotateCw class="w-6 h-6 {isLoadingRetailers ? 'animate-spin' : ''}" />
+              <RotateCw
+                class="w-6 h-6 {isLoadingRetailers ? 'animate-spin' : ''}"
+              />
             </button>
           {/if}
         </header>
@@ -198,7 +229,15 @@
         {:else if currentTab === "chat"}
           <ChatLog {api} {retailers} {requireConfirm} {showToast} />
         {:else}
-          <RetailerList {retailers} {isLoadingRetailers} {currentTab} {api} {loadRetailers} {requireConfirm} {showToast} />
+          <RetailerList
+            {retailers}
+            {isLoadingRetailers}
+            {currentTab}
+            {api}
+            {loadRetailers}
+            {requireConfirm}
+            {showToast}
+          />
         {/if}
       </div>
     </main>

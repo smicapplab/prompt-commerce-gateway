@@ -1,0 +1,17 @@
+// ─── WhatsApp sessions (customer state) ──────────────────────────────────────
+// Stores session state for users interacting with the WhatsApp bot.
+model WhatsAppSession {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id")
+  type      String   // "checkout" | "ai" | "search" | "browse"
+  data      Json
+  expiresAt DateTime @map("expires_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user WhatsAppUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@map("whatsapp_sessions")
+}

@@ -1,13 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import {
-    Search,
-    Store,
-    ArrowRight,
-    Sparkles,
-    Zap,
-    ShieldCheck,
-  } from "lucide-svelte";
+  import { Search, Store, Sparkles, Zap, ShieldCheck } from "lucide-svelte";
   import Header from "$lib/components/Header.svelte";
   import { apiFetch } from "$lib/api";
 

@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 import { RegistryService } from '../registry/registry.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 export type SenderType = 'buyer' | 'ai' | 'human' | 'system';
 
@@ -15,16 +16,18 @@ export class ConversationService {
     private readonly registry: RegistryService,
     @Inject(forwardRef(() => TelegramService))
     private readonly telegram: TelegramService,
+    @Inject(forwardRef(() => WhatsAppService))
+    private readonly whatsapp: WhatsAppService,
   ) {}
 
   /** Find or create a conversation in gateway (PostgreSQL) and mirror to seller (SQLite) */
-  async getOrCreate(buyerRef: string, buyerName: string | null, storeSlug: string) {
+  async getOrCreate(buyerRef: string, buyerName: string | null, storeSlug: string, channel: string = 'telegram') {
     let conv = await this.prisma.conversation.findUnique({
       where: {
         buyerRef_storeSlug_channel: {
           buyerRef,
           storeSlug,
-          channel: 'telegram',
+          channel,
         },
       },
     });
@@ -35,7 +38,7 @@ export class ConversationService {
           buyerRef,
           buyerName,
           storeSlug,
-          channel: 'telegram',
+          channel,
           mode: 'ai',
         },
       });
@@ -51,7 +54,7 @@ export class ConversationService {
     this.mirrorToSeller(storeSlug, 'POST', '/api/conversations', {
       buyer_ref: buyerRef,
       buyer_name: buyerName,
-      channel: 'telegram',
+      channel,
       gateway_id: conv.id,
     }).catch(err => this.logger.error(`Failed to mirror conversation to seller: ${err.message}`));
 
@@ -125,10 +128,15 @@ export class ConversationService {
     const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     if (!conv) throw new Error('Conversation not found');
 
-    // 1. Deliver to Telegram
+    // 1. Deliver to User via correct channel
     const escName = (senderName || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const prefix = escName ? `[${escName}]: ` : '';
-    await this.telegram.sendMessage(conv.buyerRef, `${prefix}${body}`, { parse_mode: 'HTML' });
+
+    if (conv.channel === 'whatsapp') {
+      await this.whatsapp.sendMessage(conv.buyerRef, `${prefix}${body}`);
+    } else if (conv.channel === 'telegram') {
+      await this.telegram.sendMessage(conv.buyerRef, `${prefix}${body}`, { parse_mode: 'HTML' });
+    }
 
     // 2. Log and mirror (this handles both PostgreSQL and SQLite)
     return this.logMessage(conversationId, conv.storeSlug, 'human', body, senderName);
@@ -153,7 +161,7 @@ export class ConversationService {
     if (conv) {
       this.mirrorToSeller(storeSlug, 'POST', `/api/conversations/lookup`, {
         buyer_ref: conv.buyerRef,
-        channel: 'telegram'
+        channel: conv.channel
       })
       .then(async (sellerConv: any) => {
         if (sellerConv?.id) {
