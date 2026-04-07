@@ -123,12 +123,42 @@
     }
   }
 
+  let activityTimeout: any;
+  const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+
+  function resetActivity() {
+    if (!isLoggedIn) return;
+    localStorage.setItem("last_activity", Date.now().toString());
+  }
+
+  function checkActivity() {
+    if (!isLoggedIn) return;
+    const last = parseInt(localStorage.getItem("last_activity") || "0", 10);
+    if (Date.now() - last > IDLE_TIMEOUT_MS) {
+      logout();
+      showToast("Session expired due to inactivity.", "error");
+    }
+  }
+
   onMount(() => {
     token = localStorage.getItem("gw_token");
     if (token) {
       isLoggedIn = true;
       loadRetailers();
+      resetActivity();
     }
+    
+    // Activity tracking
+    const activityEvents = ["mousedown", "mousemove", "keydown", "scroll", "touchstart"];
+    const handleActivity = () => resetActivity();
+    activityEvents.forEach(e => window.addEventListener(e, handleActivity, { passive: true }));
+    
+    activityTimeout = setInterval(checkActivity, 60000); // Check every minute
+    
+    return () => {
+      activityEvents.forEach(e => window.removeEventListener(e, handleActivity));
+      clearInterval(activityTimeout);
+    };
   });
 
   function showToast(msg: string, type: "success" | "error" = "success") {
@@ -548,7 +578,7 @@
     <aside
       class="w-64 md:w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm relative z-20"
     >
-      <div class="p-8 flex flex-col gap-3 overflow-y-auto">
+      <div class="p-8 flex flex-col gap-3 overflow-y-auto flex-1">
         <h3
           class="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-4 ml-1"
         >
