@@ -11,6 +11,6 @@ import { ChatModule } from '../chat/chat.module';
 @Module({
   imports:   [RegistryModule, SettingsModule, CatalogModule, PaymentModule, ChatModule],
   providers: [TelegramService, AiChatService, CartService],
-  exports:   [TelegramService, CartService],
+  exports:   [TelegramService, CartService, AiChatService],
 })
 export class TelegramModule {}

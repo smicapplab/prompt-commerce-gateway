@@ -198,34 +198,38 @@ export class CatalogController {
     };
   }
 
-  // ── PATCH /api/stores/:slug/telegram-config ───────────────────────────
+  // ── PATCH /api/stores/:slug/messaging-config ───────────────────────────
   /**
-   * Pushed by the seller when the store owner sets their notification chat ID.
-   * Body: { notifyChatId: string | null }
+   * Pushed by the seller when the store owner sets their notification endpoints.
+   * Body: { telegramChatId: string | null, whatsappNumber: string | null }
    * Auth: x-gateway-key header
    */
-  @Patch(':slug/telegram-config')
-  async setTelegramConfig(
+  @Patch(':slug/messaging-config')
+  async setMessagingConfig(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: { notifyChatId?: string | null },
+    @Body() body: { telegramChatId?: string | null; whatsappNumber?: string | null },
   ) {
     const retailer = await this.validateKey(slug, platformKey);
     await this.registry.update(retailer.id, {
-      telegramNotifyChatId: body.notifyChatId ?? null,
+      telegramNotifyChatId: body.telegramChatId !== undefined ? body.telegramChatId : retailer.telegramNotifyChatId,
+      whatsappNotifyNumber: body.whatsappNumber !== undefined ? body.whatsappNumber : retailer.whatsappNotifyNumber,
     });
-    return { message: `Telegram config updated for "${slug}".` };
+    return { message: `Messaging config updated for "${slug}".` };
   }
 
-  // ── GET /api/stores/:slug/telegram-config/status ──────────────────────
-  /** Returns whether a notification chat ID is configured. Auth: x-gateway-key */
-  @Get(':slug/telegram-config/status')
-  async getTelegramConfigStatus(
+  // ── GET /api/stores/:slug/messaging-config/status ──────────────────────
+  /** Returns whether notification endpoints are configured. Auth: x-gateway-key */
+  @Get(':slug/messaging-config/status')
+  async getMessagingConfigStatus(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
   ) {
     const retailer = await this.validateKey(slug, platformKey);
-    return { hasNotifyChatId: !!retailer.telegramNotifyChatId };
+    return { 
+      hasTelegramSetup: !!retailer.telegramNotifyChatId,
+      hasWhatsappSetup: !!retailer.whatsappNotifyNumber 
+    };
   }
 
   // ── GET /api/stores/:slug/sync/status ─────────────────────────────────

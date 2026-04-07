@@ -13,6 +13,7 @@ import { PaymentModule } from './payments/payment.module';
 import { WebhookModule } from './payments/webhook.module';
 import { StorefrontModule } from './storefront/storefront.module';
 import { ChatModule } from './chat/chat.module';
+import { WhatsAppModule } from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ChatModule } from './chat/chat.module';
     McpModule,
     MailModule,
     TelegramModule,
+    WhatsAppModule,
     SettingsModule,
     CatalogModule,
     OrdersModule,

@@ -5,12 +5,13 @@ import { defineConfig } from 'vite';
 export default defineConfig({
 	plugins: [sveltekit(), tailwindcss()],
 	server: {
-		port: 3003,
+		port: 3002,
 		proxy: {
-			'/api': 'http://localhost:3002',
-			'/sse': 'http://localhost:3002',
-			'/webhooks': 'http://localhost:3002',
-			'/payment': 'http://localhost:3002'
+			'/api': 'http://localhost:3005',
+			'/sse': 'http://localhost:3005',
+			'/webhooks': 'http://localhost:3005',
+			'/payment': 'http://localhost:3005',
+			'/mock-pay': 'http://localhost:3005'
 		}
 	}
 });

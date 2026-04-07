@@ -32,6 +32,7 @@ model Retailer {
   // notification here whenever a buyer places an order through this store.
   // The owner gets their chat ID by messaging the bot and using /myid.
   telegramNotifyChatId String? @map("telegram_notify_chat_id")
+  whatsappNotifyNumber String? @map("whatsapp_notify_number")
 
   // ── Per-store payment config ───────────────────────────────────────────────
   // paymentProvider: "mock" | "paymongo" | "stripe"

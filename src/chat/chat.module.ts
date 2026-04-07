@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { RegistryModule } from '../registry/registry.module';
 import { KeysModule } from '../keys/keys.module';
@@ -13,6 +14,7 @@ import { ChatController } from './chat.controller';
     RegistryModule,
     KeysModule,
     forwardRef(() => TelegramModule),
+    forwardRef(() => WhatsAppModule),
   ],
   controllers: [ChatController],
   providers: [ConversationService, ChatService],
