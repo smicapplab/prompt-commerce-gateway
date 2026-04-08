@@ -37,7 +37,7 @@ export class WhatsAppController {
     res.status(HttpStatus.OK).send('EVENT_RECEIVED');
 
     try {
-      await this.whatsappService.handleWebhook(req.body, signature);
+      await this.whatsappService.handleWebhook(req.body, signature, (req as any).rawBody);
     } catch (err) {
       this.logger.error(`Error processing webhook: ${err}`);
     }

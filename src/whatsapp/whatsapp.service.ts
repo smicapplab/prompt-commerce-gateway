@@ -63,11 +63,13 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
-  async handleWebhook(payload: any, signature: string): Promise<void> {
+  async handleWebhook(payload: any, signature: string, rawBodyBuffer?: Buffer): Promise<void> {
     if (!this.client.isConfigured()) return;
 
     // Verify Meta signature to reject spoofed/tampered webhooks
-    const rawBody = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    // Use the raw buffer if provided (set in main.ts), fallback to stringifying payload
+    const rawBody = rawBodyBuffer ? rawBodyBuffer.toString('utf8') : (typeof payload === 'string' ? payload : JSON.stringify(payload));
+
     if (signature && !this.client.verifySignature(rawBody, signature)) {
       this.logger.warn('Webhook signature mismatch — request rejected.');
       return;
