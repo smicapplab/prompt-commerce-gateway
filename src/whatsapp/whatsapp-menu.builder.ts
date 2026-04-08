@@ -13,6 +13,12 @@ export const WA_ACTION = {
   AI_CHAT: 'ai_chat',
   ADDR_SELECT: 'addr_sel',
   ADDR_NEW: 'addr_new',
+  DELIVERY_SEL: 'delivery_sel',
+  PROV_SEL: 'prov_sel',
+  CITY_SEL: 'city_sel',
+  BRGY_SEL: 'brgy_sel',
+  LABEL_SEL: 'label_sel',
+  PAY_SEL: 'pay_sel',
 };
 
 // ─── Welcome / Store Selection ──────────────────────────────────────────────
@@ -127,6 +133,72 @@ export function buildProductDetailButtons(product: CachedProduct, storeSlug: str
         { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: '🛒 Add to Cart' } },
         { type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: '🛒 View Cart' } },
         { type: 'reply', reply: { id: `${WA_ACTION.CAT_MENU}:${storeSlug}`, title: '🏪 Store Menu' } }
+      ]
+    }
+  };
+}
+
+// ─── Delivery Type Selection ────────────────────────────────────────────────
+export function buildDeliveryMenu(storeSlug: string, allowsPickup: boolean): InteractiveMessage {
+  const buttons = [
+    { type: 'reply', reply: { id: `${WA_ACTION.DELIVERY_SEL}:${storeSlug}:delivery`, title: '🏠 Home Delivery' } }
+  ];
+  if (allowsPickup) {
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.DELIVERY_SEL}:${storeSlug}:pickup`, title: '🏪 Store Pickup' } });
+  }
+  
+  return {
+    type: 'button',
+    body: { text: '🚚 *Delivery Options*\n\nHow would you like to receive your order?' },
+    action: { buttons: buttons as any }
+  };
+}
+
+// ─── Location Selection (Province/City/Barangay) ───────────────────────────
+export function buildLocationListMenu(
+  storeSlug: string, 
+  type: 'province' | 'city' | 'barangay', 
+  items: { code: string, name: string }[]
+): InteractiveMessage {
+  const titleMap = { province: 'Province', city: 'City/Mun.', barangay: 'Barangay' };
+  const actionMap = { province: WA_ACTION.PROV_SEL, city: WA_ACTION.CITY_SEL, barangay: WA_ACTION.BRGY_SEL };
+
+  return {
+    type: 'list',
+    header: { type: 'text', text: `Select ${titleMap[type]}` },
+    body: { text: `Please choose your ${type} from the list below.` },
+    action: {
+      button: `Select ${titleMap[type]}`,
+      sections: [
+        {
+          title: titleMap[type],
+          rows: items.slice(0, 10).map(item => ({
+            id: `${actionMap[type]}:${storeSlug}:${item.code}`,
+            title: item.name.substring(0, 24)
+          }))
+        }
+      ]
+    }
+  };
+}
+
+// ─── Address Label Selection ───────────────────────────────────────────────
+export function buildLabelMenu(storeSlug: string): InteractiveMessage {
+  return {
+    type: 'list',
+    header: { type: 'text', text: 'Save Address' },
+    body: { text: 'How would you like to label this address?' },
+    action: {
+      button: 'Choose Label',
+      sections: [
+        {
+          title: 'Labels',
+          rows: [
+            { id: `${WA_ACTION.LABEL_SEL}:${storeSlug}:Home`, title: 'Home' },
+            { id: `${WA_ACTION.LABEL_SEL}:${storeSlug}:Work`, title: 'Work' },
+            { id: `${WA_ACTION.LABEL_SEL}:${storeSlug}:Other`, title: 'Other' },
+          ]
+        }
       ]
     }
   };
