@@ -127,6 +127,29 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
+  private async resolveImageUrl(product: any, storeSlug: string): Promise<string | undefined> {
+    const images = Array.isArray(product.images) ? product.images : [];
+    let imageUrl = images[0] as string | undefined;
+
+    if (!imageUrl) return undefined;
+
+    // If it's already an absolute URL, return it
+    if (imageUrl.startsWith('http')) {
+      return imageUrl;
+    }
+
+    // Otherwise, build an absolute URL using the store's MCP server base URL
+    try {
+      const retailer = await this.registry.findBySlug(storeSlug);
+      if (!retailer || !retailer.mcpServerUrl) return undefined;
+      
+      const base = retailer.mcpServerUrl.replace(/\/sse\/?$/, '').replace(/\/$/, '');
+      return `${base}/uploads/${imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl}`;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async routeMessage(waId: string, name: string, text: string, messageId: string) {
     this.logger.log(`Received text message from ${waId}: ${text}`);
 
@@ -355,14 +378,12 @@ export class WhatsAppService implements OnModuleInit {
     // Send visual cards (One image + text per product for "photo card" feel)
     for (const p of storeResults) {
       const retailer = await this.registry.findBySlug(p.storeSlug);
-      const mcpUrl = retailer?.mcpServerUrl;
       
       // Use short detail for search results
       const caption = this.catalogFormatter.productShortDetail(p, !session?.storeSlug ? retailer?.name : undefined, 'whatsapp');
+      const imageUrl = await this.resolveImageUrl(p, p.storeSlug);
 
-      if (p.images && p.images.length > 0 && mcpUrl) {
-        const baseUrl = mcpUrl.replace(/\/sse\/?$/, '');
-        const imageUrl = `${baseUrl}/uploads/${p.images[0]}`;
+      if (imageUrl) {
         try {
           await this.client.sendImage(waId, imageUrl, caption);
         } catch (err) {
@@ -430,10 +451,9 @@ export class WhatsAppService implements OnModuleInit {
       const retailer = await this.registry.findBySlug(targetSlug);
       const mcpUrl = retailer?.mcpServerUrl;
       const detailText = this.catalogFormatter.productDetail(product, 'whatsapp', mcpUrl);
+      const imageUrl = await this.resolveImageUrl(product, targetSlug);
 
-      if (product.images && product.images.length > 0 && mcpUrl) {
-        const baseUrl = mcpUrl.replace(/\/sse\/?$/, '');
-        const imageUrl = `${baseUrl}/uploads/${product.images[0]}`;
+      if (imageUrl) {
         try {
           await this.client.sendImage(waId, imageUrl, detailText);
         } catch (err) {
