@@ -53,7 +53,7 @@ export class WhatsAppService implements OnModuleInit {
   async initClient(): Promise<void> {
     const phoneNumberId = (await this.settings.get('whatsapp_phone_number_id'))?.trim() ?? process.env.WHATSAPP_PHONE_NUMBER_ID;
     const accessToken = (await this.settings.get('whatsapp_access_token'))?.trim() ?? process.env.WHATSAPP_ACCESS_TOKEN;
-    const webhookSecret = (await this.settings.get('whatsapp_webhook_secret'))?.trim();
+    const webhookSecret = (await this.settings.get('whatsapp_webhook_secret'))?.trim() ?? process.env.WHATSAPP_APP_SECRET;
 
     if (phoneNumberId && accessToken && webhookSecret) {
       this.client.setConfig(phoneNumberId, accessToken, webhookSecret);

@@ -40,7 +40,7 @@ async function bootstrap(): Promise<void> {
   //   /api/*       → standard JSON parsing
   //   everything else → no body parsing (MCP SSE streams, etc.)
   expressApp.use((req: any, res: any, next: any) => {
-    if (req.path.startsWith('/webhooks/')) {
+    if (req.path.startsWith('/webhooks/') || req.path.startsWith('/whatsapp/')) {
       // Capture raw body AND parse JSON; raw body needed for HMAC signature check
       express.json({
         limit: '1mb',
@@ -65,6 +65,7 @@ async function bootstrap(): Promise<void> {
         req.path.startsWith('/api') ||
         req.path.startsWith('/sse') ||
         req.path.startsWith('/webhooks') ||
+        req.path.startsWith('/whatsapp') ||
         req.path.startsWith('/payment') ||
         req.path.startsWith('/mock-pay') ||
         req.path.includes('.')

@@ -18,7 +18,7 @@ export class WhatsAppController {
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    const expectedToken = await this.settings.get('whatsapp_webhook_verify_token');
+    const expectedToken = (await this.settings.get('whatsapp_webhook_verify_token')) || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
 
     if (mode === 'subscribe' && token === expectedToken) {
       this.logger.log('Webhook verified successfully.');
