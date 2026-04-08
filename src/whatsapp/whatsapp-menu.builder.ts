@@ -103,16 +103,30 @@ export function buildSearchResultsList(products: CachedProduct[], query: string,
   };
 }
 
-// ─── Product Details Menu ───────────────────────────────────────────────────
-export function buildProductDetailMenu(product: CachedProduct, storeSlug: string): InteractiveMessage {
+// ─── Search Result Buttons ──────────────────────────────────────────────────
+export function buildSearchResultButtons(product: CachedProduct, storeSlug: string): InteractiveMessage {
   return {
     type: 'button',
-    body: { text: `Would you like to add ${product.title} to your cart?` },
+    body: { text: `Options for ${product.title}:` },
     action: {
       buttons: [
-        { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: 'Add to Cart' } },
-        { type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: 'View Cart' } },
-        { type: 'reply', reply: { id: `${WA_ACTION.CAT_MENU}:${storeSlug}`, title: 'Menu' } }
+        { type: 'reply', reply: { id: `${WA_ACTION.PROD_SELECT}:${storeSlug}:${product.sellerId}`, title: '📋 View Details' } },
+        { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: '🛒 Add to Cart' } }
+      ]
+    }
+  };
+}
+
+// ─── Product Details Buttons ────────────────────────────────────────────────
+export function buildProductDetailButtons(product: CachedProduct, storeSlug: string): InteractiveMessage {
+  return {
+    type: 'button',
+    body: { text: `Add ${product.title} to your cart?` },
+    action: {
+      buttons: [
+        { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: '🛒 Add to Cart' } },
+        { type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: '🛒 View Cart' } },
+        { type: 'reply', reply: { id: `${WA_ACTION.CAT_MENU}:${storeSlug}`, title: '🏪 Store Menu' } }
       ]
     }
   };

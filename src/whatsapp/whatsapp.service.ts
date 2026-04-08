@@ -16,7 +16,8 @@ import {
   buildStoreListMenu,
   buildStoreMainMenu,
   buildSearchResultsList,
-  buildProductDetailMenu,
+  buildSearchResultButtons,
+  buildProductDetailButtons,
   buildCartMenu,
   buildAddressSelectMenu,
   buildPaymentMenu,
@@ -355,9 +356,9 @@ export class WhatsAppService implements OnModuleInit {
     for (const p of storeResults) {
       const retailer = await this.registry.findBySlug(p.storeSlug);
       const mcpUrl = retailer?.mcpServerUrl;
-      const details = this.catalogFormatter.productDetail(p, 'whatsapp', mcpUrl);
-      const storePrefix = !session?.storeSlug ? `🏪 *${retailer?.name || p.storeSlug}*\n` : '';
-      const caption = storePrefix + details;
+      
+      // Use short detail for search results
+      const caption = this.catalogFormatter.productShortDetail(p, !session?.storeSlug ? retailer?.name : undefined, 'whatsapp');
 
       if (p.images && p.images.length > 0 && mcpUrl) {
         const baseUrl = mcpUrl.replace(/\/sse\/?$/, '');
@@ -371,8 +372,8 @@ export class WhatsAppService implements OnModuleInit {
         await this.client.sendText(waId, caption);
       }
       
-      // Send interactive buttons for the product
-      await this.client.sendInteractive(waId, buildProductDetailMenu(p, p.storeSlug));
+      // Send interactive buttons for search result (View Details, Add to Cart)
+      await this.client.sendInteractive(waId, buildSearchResultButtons(p, p.storeSlug));
     }
 
     if (storeResults.length > 1) {
@@ -442,7 +443,7 @@ export class WhatsAppService implements OnModuleInit {
         await this.client.sendText(waId, detailText);
       }
 
-      await this.client.sendInteractive(waId, buildProductDetailMenu(product, targetSlug));
+      await this.client.sendInteractive(waId, buildProductDetailButtons(product, targetSlug));
       return;
     }
 

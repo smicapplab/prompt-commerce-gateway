@@ -52,11 +52,35 @@ export class CatalogFormatter {
         ? `\n🆔 SKU: <code>${escapedSku}</code>`
         : `\n🆔 SKU: \`\`\`${escapedSku}\`\`\``;
     }
+
+    const stock = product.stockQuantity != null
+      ? (mode === 'html' 
+          ? `\n📦 ${product.stockQuantity === 0 ? '⚠️ <i>Out of stock</i>' : `${product.stockQuantity} in stock`}`
+          : `\n📦 ${product.stockQuantity === 0 ? '⚠️ _Out of stock_' : `${product.stockQuantity} in stock`}`)
+      : '';
     
     if (mode === 'html') {
-      return `<b>${title}</b>\n💰 <b>₱${price}</b>\n\n${desc}${sku}${tags}`;
+      return `<b>${title}</b>\n💰 <b>₱${price}</b>${stock}\n\n${desc}${sku}${tags}`;
     } else {
-      return `*${title}*\n💰 *₱${price}*\n\n${desc}${sku}${tags}`;
+      return `*${title}*\n💰 *₱${price}*${stock}\n\n${desc}${sku}${tags}`;
+    }
+  }
+
+  /**
+   * Formats a product into a concise one-liner or short block for search results
+   */
+  productShortDetail(product: CachedProduct, storeName?: string, mode: FormatMode = 'html'): string {
+    const title = this.esc(product.title, mode);
+    const price = this.price(product.price);
+    const store = storeName ? (mode === 'html' ? `\n🏪 <i>${this.esc(storeName, mode)}</i>` : `\n🏪 _${this.esc(storeName, mode)}_`) : '';
+    const stock = product.stockQuantity != null && product.stockQuantity === 0
+      ? (mode === 'html' ? ' ⚠️ <i>(Out of stock)</i>' : ' ⚠️ _(Out of stock)_')
+      : '';
+
+    if (mode === 'html') {
+      return `<b>${title}</b>\n💰 <b>₱${price}</b>${stock}${store}`;
+    } else {
+      return `*${title}*\n💰 *₱${price}*${stock}${store}`;
     }
   }
 
