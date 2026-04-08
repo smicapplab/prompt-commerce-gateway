@@ -10,7 +10,7 @@ export class WhatsAppController {
   constructor(
     private readonly settings: SettingsService,
     private readonly whatsappService: WhatsAppService,
-  ) {}
+  ) { }
 
   @Get('webhook')
   async verifyWebhook(@Req() req: Request, @Res() res: Response) {
@@ -18,13 +18,13 @@ export class WhatsAppController {
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    const expectedToken = (await this.settings.get('whatsapp_webhook_verify_token')) || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+    const expectedToken = (await this.settings.get('whatsapp_webhook_verify_token'))?.trim() ?? process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
 
     if (mode === 'subscribe' && token === expectedToken) {
       this.logger.log('Webhook verified successfully.');
       return res.status(HttpStatus.OK).send(challenge);
     }
-    
+
     this.logger.warn('Webhook verification failed.');
     return res.status(HttpStatus.FORBIDDEN).send();
   }
@@ -32,7 +32,7 @@ export class WhatsAppController {
   @Post('webhook')
   async handleWebhook(@Req() req: Request, @Res() res: Response) {
     const signature = req.headers['x-hub-signature-256'] as string;
-    
+
     // We send OK immediately to avoid Meta retries if our processing takes time
     res.status(HttpStatus.OK).send('EVENT_RECEIVED');
 

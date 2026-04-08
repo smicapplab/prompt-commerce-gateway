@@ -12,15 +12,15 @@ import { WhatsAppClient } from './whatsapp-client';
 import { WhatsAppSessionService } from './whatsapp-session.service';
 import { CatalogFormatter } from '../catalog/catalog-formatter';
 import { callRetailerTool } from '../mcp/retailer-client';
-import { 
-  buildStoreListMenu, 
-  buildStoreMainMenu, 
-  buildSearchResultsList, 
-  buildProductDetailMenu, 
+import {
+  buildStoreListMenu,
+  buildStoreMainMenu,
+  buildSearchResultsList,
+  buildProductDetailMenu,
   buildCartMenu,
   buildAddressSelectMenu,
   buildPaymentMenu,
-  WA_ACTION 
+  WA_ACTION
 } from './whatsapp-menu.builder';
 
 interface PlatformSession {
@@ -44,7 +44,7 @@ export class WhatsAppService implements OnModuleInit {
     private readonly sessionService: WhatsAppSessionService,
     private readonly catalogFormatter: CatalogFormatter,
     @Optional() private readonly paymentService?: PaymentService,
-  ) {}
+  ) { }
 
   async onModuleInit(): Promise<void> {
     await this.initClient();
@@ -53,10 +53,10 @@ export class WhatsAppService implements OnModuleInit {
   async initClient(): Promise<void> {
     const phoneNumberId = (await this.settings.get('whatsapp_phone_number_id'))?.trim() ?? process.env.WHATSAPP_PHONE_NUMBER_ID;
     const accessToken = (await this.settings.get('whatsapp_access_token'))?.trim() ?? process.env.WHATSAPP_ACCESS_TOKEN;
-    const webhookSecret = (await this.settings.get('whatsapp_webhook_secret'))?.trim() ?? process.env.WHATSAPP_APP_SECRET;
+    const webhookSecret = (await this.settings.get('whatsapp_webhook_secret'))?.trim() ?? process.env.WHATSAPP_WEBHOOK_SECRET ?? process.env.WHATSAPP_APP_SECRET;
 
-    if (phoneNumberId && accessToken && webhookSecret) {
-      this.client.setConfig(phoneNumberId, accessToken, webhookSecret);
+    if (phoneNumberId && accessToken && (webhookSecret || process.env.NODE_ENV === 'development')) {
+      this.client.setConfig(phoneNumberId, accessToken, webhookSecret || '');
       this.logger.log('WhatsAppClient configured.');
     } else {
       this.logger.warn('WhatsApp configuration incomplete. Bot is disabled.');
@@ -65,14 +65,14 @@ export class WhatsAppService implements OnModuleInit {
 
   async handleWebhook(payload: any, signature: string): Promise<void> {
     if (!this.client.isConfigured()) return;
-    
+
     // Verify Meta signature to reject spoofed/tampered webhooks
     const rawBody = typeof payload === 'string' ? payload : JSON.stringify(payload);
     if (signature && !this.client.verifySignature(rawBody, signature)) {
       this.logger.warn('Webhook signature mismatch — request rejected.');
       return;
     }
-    
+
     const entries = payload.entry || [];
     for (const entry of entries) {
       const changes = entry.changes || [];
@@ -80,7 +80,7 @@ export class WhatsAppService implements OnModuleInit {
         if (change.value && change.value.messages) {
           const messages = change.value.messages;
           const contacts = change.value.contacts || [];
-          
+
           for (const msg of messages) {
             const waId = msg.from;
             const name = contacts.find((c: any) => c.wa_id === waId)?.profile?.name || 'Customer';
@@ -126,7 +126,7 @@ export class WhatsAppService implements OnModuleInit {
 
   private async routeMessage(waId: string, name: string, text: string, messageId: string) {
     this.logger.log(`Received text message from ${waId}: ${text}`);
-    
+
     // Command overrides
     if (text.toLowerCase() === '/start' || text.toLowerCase() === 'menu') {
       const activeRetailers = await this.registry.findActiveRetailers();
@@ -178,10 +178,10 @@ export class WhatsAppService implements OnModuleInit {
           isDefault: true
         }
       });
-      await this.sessionService.setSession(waId, 'main', { 
-        ...session, 
-        address: text, 
-        step: 'payment' 
+      await this.sessionService.setSession(waId, 'main', {
+        ...session,
+        address: text,
+        step: 'payment'
       });
       return this.showPaymentMenu(waId, session.storeSlug);
     }
@@ -190,7 +190,7 @@ export class WhatsAppService implements OnModuleInit {
       const slug = session.storeSlug;
       const cartUserId = `wa:${waId}`;
       const items = await this.cartService.get(cartUserId, slug);
-      
+
       if (!items.length) return this.client.sendText(waId, 'Your cart is empty.');
 
       const retailer = await this.registry.findBySlug(slug);
@@ -199,10 +199,10 @@ export class WhatsAppService implements OnModuleInit {
       try {
         // 1. Create order on Seller Server via MCP
         const mcpRes = await callRetailerTool(
-          { 
-            slug: retailer.slug, 
-            mcpServerUrl: retailer.mcpServerUrl, 
-            platformKey: retailer.platformKey?.key || '' 
+          {
+            slug: retailer.slug,
+            mcpServerUrl: retailer.mcpServerUrl,
+            platformKey: retailer.platformKey?.key || ''
           },
           'create_order',
           {
@@ -240,7 +240,7 @@ export class WhatsAppService implements OnModuleInit {
         await this.sessionService.deleteSession(waId, 'main'); // delete, not null-set, to prevent stuck state
 
         let finalMsg = `✅ *Order #${orderId} Placed!*\n\nThank you ${session.name}, your order has been received and is being processed by *${retailer.name}*.\n\n`;
-        
+
         if (payment?.paymentUrl) {
           if (payment.paymentUrl.includes('localhost') || payment.paymentUrl.includes('127.0.0.1')) {
             finalMsg += `💳 *Complete Payment:*\n${payment.paymentUrl}`;
@@ -258,11 +258,11 @@ export class WhatsAppService implements OnModuleInit {
           finalMsg += `📦 Status: *Pending Delivery*`;
           await this.client.sendText(waId, finalMsg);
         }
-        
+
         // 4. Notify seller if configured
         if (retailer.whatsappNotifyNumber) {
           const itemLines = items.map(i => `• ${i.title} × ${i.quantity} = ₱${(i.price * i.quantity).toLocaleString()}`).join('\n');
-          const notifyMsg = 
+          const notifyMsg =
             `🔔 *New Order #${orderId}*\n\n` +
             `*Store:* ${retailer.name}\n` +
             `*Customer:* ${session.name || 'WhatsApp Buyer'} (${waId})\n\n` +
@@ -271,7 +271,7 @@ export class WhatsAppService implements OnModuleInit {
             `*Address:*\n${session.address}\n\n` +
             `*Payment:* ${session.paymentMethod.toUpperCase()}\n\n` +
             `_Check Admin Panel for details._`;
-          
+
           this.client.sendText(retailer.whatsappNotifyNumber, notifyMsg).catch(err => {
             this.logger.error(`Failed to send WhatsApp notification to seller: ${err.message}`);
           });
@@ -289,7 +289,7 @@ export class WhatsAppService implements OnModuleInit {
         await this.sessionService.setSession(waId, 'main', { ...session, step: undefined });
         return this.client.sendText(waId, 'Exited AI Assistant mode. Type a search or choose an option from the menu.');
       }
-      
+
       const retailer = await this.registry.findBySlug(session.storeSlug);
       if (!retailer) return;
 
@@ -307,8 +307,8 @@ export class WhatsAppService implements OnModuleInit {
 
       // To keep it simple for WhatsApp, we use a single conversation scope per user/store
       const conv = await this.conversationService.getOrCreate(
-        String(waId), 
-        name || 'Customer', 
+        String(waId),
+        name || 'Customer',
         session.storeSlug,
         'whatsapp'
       );
@@ -335,10 +335,10 @@ export class WhatsAppService implements OnModuleInit {
 
     // Natural Language Search!
     this.client.sendText(waId, `🔎 Searching "${text}"...`);
-    
+
     // Fall back to catalog smart search
     const { results } = await this.catalog.smartSearch(text);
-    const storeResults = results.filter(r => r.storeSlug === session.storeSlug).slice(0, 10); 
+    const storeResults = results.filter(r => r.storeSlug === session.storeSlug).slice(0, 10);
 
     if (storeResults.length === 0) {
       return this.client.sendText(waId, `🔍 No products found for "${text}". Try a different search.`);
@@ -355,12 +355,12 @@ export class WhatsAppService implements OnModuleInit {
 
     // Example payload: store_sel:my-store
     // Example payload: prod_sel:my-store:123
-    
+
     if (action === WA_ACTION.STORE_SELECT) {
       const storeSlug = parts[1];
       const retailer = await this.registry.findBySlug(storeSlug);
       if (!retailer) return this.client.sendText(waId, 'Store not found.');
-      
+
       await this.sessionService.setSession(waId, 'main', { storeSlug });
       await this.client.sendInteractive(waId, buildStoreMainMenu(retailer.name, storeSlug));
       return;
@@ -390,7 +390,7 @@ export class WhatsAppService implements OnModuleInit {
 
       // Send image if available, otherwise just text
       const detailText = this.catalogFormatter.productDetail(product, process.env.GATEWAY_PUBLIC_URL);
-      
+
       if (product.images && product.images.length > 0) {
         // Warning: Localhost images won't work in WhatsApp API. 
         // We will send text first while building out the URL resolving flow.
@@ -411,15 +411,15 @@ export class WhatsAppService implements OnModuleInit {
       const product = await this.prisma.cachedProduct.findUnique({
         where: { storeSlug_sellerId: { storeSlug: slug, sellerId: productId } }
       });
-      
+
       if (!product) return this.client.sendText(waId, 'Product no longer available.');
-      
-      await this.cartService.add(cartUserId, slug, { 
-        productId: product.sellerId, 
-        title: product.title, 
-        price: product.price || 0 
+
+      await this.cartService.add(cartUserId, slug, {
+        productId: product.sellerId,
+        title: product.title,
+        price: product.price || 0
       }, qty);
-      
+
       await this.client.sendText(waId, `✅ Added ${qty}x ${product.title} to cart.`);
       const items = await this.cartService.get(cartUserId, slug);
       await this.client.sendInteractive(waId, buildCartMenu(slug, items.length));
@@ -431,12 +431,12 @@ export class WhatsAppService implements OnModuleInit {
         await this.cartService.clear(cartUserId, slug);
         await this.client.sendText(waId, '🗑 Cart cleared.');
       }
-      
+
       const items = await this.cartService.get(cartUserId, slug);
       const total = await this.cartService.total(cartUserId, slug);
       const retailer = await this.registry.findBySlug(slug);
       const storeName = retailer ? retailer.name : 'Store';
-      
+
       await this.client.sendText(waId, this.catalogFormatter.cartSummary(storeName, items, total));
       await this.client.sendInteractive(waId, buildCartMenu(slug, items.length));
       return;
@@ -454,9 +454,9 @@ export class WhatsAppService implements OnModuleInit {
       const addressId = parseInt(parts[2], 10);
       const address = await this.prisma.whatsAppAddress.findUnique({ where: { id: addressId } });
       if (!address) return this.client.sendText(waId, 'Address error.');
-      
-      await this.sessionService.setSession(waId, 'main', { 
-        storeSlug: slug, 
+
+      await this.sessionService.setSession(waId, 'main', {
+        storeSlug: slug,
         step: 'payment',
         address: `${address.streetLine}, ${address.city}, ${address.province}`
       });
@@ -478,11 +478,11 @@ export class WhatsAppService implements OnModuleInit {
       const method = parts[2];
       const session = await this.sessionService.getSession<any>(waId, 'main');
       await this.sessionService.setSession(waId, 'main', { ...session, paymentMethod: method, step: 'confirm' });
-      
+
       const items = await this.cartService.get(cartUserId, slug);
       const total = await this.cartService.total(cartUserId, slug);
       const summary = this.catalogFormatter.cartSummary('Review Order', items, total);
-      
+
       const confirmText = `${summary}\n\n📍 *Delivery Address:*\n${session.address}\n\n💳 *Payment:*\n${method.toUpperCase()}\n\nReply with "place order" to confirm!`;
       return this.client.sendText(waId, confirmText);
     }
@@ -505,12 +505,12 @@ export class WhatsAppService implements OnModuleInit {
   private async showPaymentMenu(waId: string, slug: string) {
     const retailer = await this.registry.findBySlug(slug);
     if (!retailer) return this.client.sendText(waId, 'Store error.');
-    
+
     let methods: string[] = ['cod'];
     try {
       methods = JSON.parse(retailer.paymentMethods);
     } catch { /* use default cod */ }
-    
+
     return this.client.sendInteractive(waId, buildPaymentMenu(slug, methods));
   }
 
