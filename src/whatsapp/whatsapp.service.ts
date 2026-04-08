@@ -130,7 +130,7 @@ export class WhatsAppService implements OnModuleInit {
     this.logger.log(`Received text message from ${waId}: ${text}`);
 
     // Command overrides
-    if (text.toLowerCase() === '/start' || text.toLowerCase() === 'menu') {
+    if (text.toLowerCase() === '/start' || text.toLowerCase() === 'menu' || text.toLowerCase() === 'hi' || text.toLowerCase() === 'hello') {
       const activeRetailers = await this.registry.findActiveRetailers();
       if (activeRetailers.length === 0) {
         return this.client.sendText(waId, 'No stores are currently active.');
@@ -146,36 +146,32 @@ export class WhatsAppService implements OnModuleInit {
       }
     }
 
-    // Standard routing
     const session = await this.sessionService.getSession<any>(waId, 'main');
-    if (!session || !session.storeSlug) {
-      const activeRetailers = await this.registry.findActiveRetailers();
-      const storeMap = activeRetailers.map(r => ({ slug: r.slug, name: r.name }));
-      return this.client.sendInteractive(waId, buildStoreListMenu(storeMap));
-    }
-
+    
     // ── Unified Logging: Log buyer message ──
-    try {
-      const conv = await this.conversationService.getOrCreate(String(waId), name || 'Buyer', session.storeSlug, 'whatsapp');
-      await this.conversationService.logMessage(conv.id, session.storeSlug, 'buyer', text);
-    } catch (err) {
-      this.logger.error(`Failed to log message: ${err}`);
+    if (session?.storeSlug) {
+      try {
+        const conv = await this.conversationService.getOrCreate(String(waId), name || 'Buyer', session.storeSlug, 'whatsapp');
+        await this.conversationService.logMessage(conv.id, session.storeSlug, 'buyer', text);
+      } catch (err) {
+        this.logger.error(`Failed to log message: ${err}`);
+      }
     }
 
-    // Checkout Flow Interception
-    if (session.step === 'collect:name') {
+    // Checkout Flow Interception (requires session)
+    if (session?.step === 'collect:name') {
       await this.sessionService.setSession(waId, 'main', { ...session, name: text, step: 'collect:address' });
       return this.client.sendText(waId, `Thanks, ${text}! Now, what is your *Delivery Address*?\n(Street, Barangay, City, Province)`);
     }
 
-    if (session.step === 'collect:address') {
+    if (session?.step === 'collect:address') {
       // Create permanent address record
       await this.prisma.whatsAppAddress.create({
         data: {
           userId: waId,
           label: 'Primary',
           streetLine: text,
-          city: 'Unknown', // In real flow we'd parse this better
+          city: 'Unknown',
           province: 'Unknown',
           isDefault: true
         }
@@ -188,7 +184,7 @@ export class WhatsAppService implements OnModuleInit {
       return this.showPaymentMenu(waId, session.storeSlug);
     }
 
-    if (session.step === 'confirm' && text.toLowerCase().includes('place order')) {
+    if (session?.step === 'confirm' && text.toLowerCase().includes('place order')) {
       const slug = session.storeSlug;
       const cartUserId = `wa:${waId}`;
       const items = await this.cartService.get(cartUserId, slug);
@@ -239,7 +235,7 @@ export class WhatsAppService implements OnModuleInit {
 
         // 3. Send final confirmation
         await this.cartService.clear(cartUserId, slug);
-        await this.sessionService.deleteSession(waId, 'main'); // delete, not null-set, to prevent stuck state
+        await this.sessionService.deleteSession(waId, 'main'); 
 
         let finalMsg = `✅ *Order #${orderId} Placed!*\n\nThank you ${session.name}, your order has been received and is being processed by *${retailer.name}*.\n\n`;
 
@@ -286,7 +282,7 @@ export class WhatsAppService implements OnModuleInit {
     }
 
     // AI Chat Mode Interception
-    if (session.step === 'ai_chat') {
+    if (session?.step === 'ai_chat') {
       if (text.toLowerCase() === 'exit' || text.toLowerCase() === 'quit') {
         await this.sessionService.setSession(waId, 'main', { ...session, step: undefined });
         return this.client.sendText(waId, 'Exited AI Assistant mode. Type a search or choose an option from the menu.');
@@ -307,7 +303,6 @@ export class WhatsAppService implements OnModuleInit {
         return this.client.sendText(waId, '⚠️ AI Assistant is not configured for this store.');
       }
 
-      // To keep it simple for WhatsApp, we use a single conversation scope per user/store
       const conv = await this.conversationService.getOrCreate(
         String(waId),
         name || 'Customer',
@@ -315,7 +310,7 @@ export class WhatsAppService implements OnModuleInit {
         'whatsapp'
       );
 
-      this.client.sendText(waId, '...'); // typing indicator workaround
+      this.client.sendText(waId, '...'); 
 
       try {
         const result = await this.aiChat.chat(
@@ -325,7 +320,8 @@ export class WhatsAppService implements OnModuleInit {
           { slug: retailer.slug, mcpServerUrl: retailer.mcpServerUrl, platformKey: retailer.platformKey?.key || '' },
           text,
           aiConfig,
-          conv.id
+          conv.id,
+          'whatsapp'
         );
 
         return this.client.sendText(waId, result.text);
@@ -340,14 +336,48 @@ export class WhatsAppService implements OnModuleInit {
 
     // Fall back to catalog smart search
     const { results } = await this.catalog.smartSearch(text);
-    const storeResults = results.filter(r => r.storeSlug === session.storeSlug).slice(0, 10);
+    
+    // Filter results: if session has storeSlug, only show that store's results. 
+    // Otherwise show all results.
+    const storeResults = session?.storeSlug 
+      ? results.filter(r => r.storeSlug === session.storeSlug).slice(0, 5)
+      : results.slice(0, 5);
 
     if (storeResults.length === 0) {
-      return this.client.sendText(waId, `🔍 No products found for "${text}". Try a different search.`);
+      if (!session?.storeSlug) {
+        return this.client.sendText(waId, `🔍 No products found for "${text}" across all stores.`);
+      } else {
+        return this.client.sendText(waId, `🔍 No products found for "${text}" in this store. Type "menu" to change stores.`);
+      }
     }
 
-    // Send visual list
-    await this.client.sendInteractive(waId, buildSearchResultsList(storeResults, text, session.storeSlug));
+    // Send visual cards (One image + text per product for "photo card" feel)
+    for (const p of storeResults) {
+      const retailer = await this.registry.findBySlug(p.storeSlug);
+      const mcpUrl = retailer?.mcpServerUrl;
+      const details = this.catalogFormatter.productDetail(p, 'whatsapp', mcpUrl);
+      const storePrefix = !session?.storeSlug ? `🏪 *${retailer?.name || p.storeSlug}*\n` : '';
+      const caption = storePrefix + details;
+
+      if (p.images && p.images.length > 0 && mcpUrl) {
+        const baseUrl = mcpUrl.replace(/\/sse\/?$/, '');
+        const imageUrl = `${baseUrl}/uploads/${p.images[0]}`;
+        try {
+          await this.client.sendImage(waId, imageUrl, caption);
+        } catch (err) {
+          await this.client.sendText(waId, caption);
+        }
+      } else {
+        await this.client.sendText(waId, caption);
+      }
+      
+      // Send interactive buttons for the product
+      await this.client.sendInteractive(waId, buildProductDetailMenu(p, p.storeSlug));
+    }
+
+    if (storeResults.length > 1) {
+       await this.client.sendText(waId, `👆 Showing top ${storeResults.length} results.`);
+    }
   }
 
   private async routeInteractive(waId: string, payload: string) {
@@ -381,109 +411,127 @@ export class WhatsAppService implements OnModuleInit {
     }
 
     if (action === WA_ACTION.PROD_SELECT) {
+      const targetSlug = parts[1];
       const productId = parseInt(parts[2], 10);
       const product = await this.prisma.cachedProduct.findUnique({
-        where: { storeSlug_sellerId: { storeSlug: slug, sellerId: productId } }
+        where: { storeSlug_sellerId: { storeSlug: targetSlug, sellerId: productId } }
       });
 
       if (!product) {
         return this.client.sendText(waId, 'Product not found.');
       }
 
-      // Send image if available, otherwise just text
-      const detailText = this.catalogFormatter.productDetail(product, process.env.GATEWAY_PUBLIC_URL);
+      // If user selected a product from a different store than current session, switch store
+      if (session.storeSlug !== targetSlug) {
+        await this.sessionService.setSession(waId, 'main', { ...session, storeSlug: targetSlug });
+      }
 
-      if (product.images && product.images.length > 0) {
-        // Warning: Localhost images won't work in WhatsApp API. 
-        // We will send text first while building out the URL resolving flow.
-        await this.client.sendText(waId, detailText);
+      const retailer = await this.registry.findBySlug(targetSlug);
+      const mcpUrl = retailer?.mcpServerUrl;
+      const detailText = this.catalogFormatter.productDetail(product, 'whatsapp', mcpUrl);
+
+      if (product.images && product.images.length > 0 && mcpUrl) {
+        const baseUrl = mcpUrl.replace(/\/sse\/?$/, '');
+        const imageUrl = `${baseUrl}/uploads/${product.images[0]}`;
+        try {
+          await this.client.sendImage(waId, imageUrl, detailText);
+        } catch (err) {
+          await this.client.sendText(waId, detailText);
+        }
       } else {
         await this.client.sendText(waId, detailText);
       }
 
-      await this.client.sendInteractive(waId, buildProductDetailMenu(product, slug));
+      await this.client.sendInteractive(waId, buildProductDetailMenu(product, targetSlug));
       return;
     }
 
     const cartUserId = `wa:${waId}`;
 
     if (action === WA_ACTION.CART_ADD) {
+      const targetSlug = parts[1];
       const productId = parseInt(parts[2], 10);
       const qty = parseInt(parts[3] || '1', 10);
       const product = await this.prisma.cachedProduct.findUnique({
-        where: { storeSlug_sellerId: { storeSlug: slug, sellerId: productId } }
+        where: { storeSlug_sellerId: { storeSlug: targetSlug, sellerId: productId } }
       });
 
       if (!product) return this.client.sendText(waId, 'Product no longer available.');
 
-      await this.cartService.add(cartUserId, slug, {
+      await this.cartService.add(cartUserId, targetSlug, {
         productId: product.sellerId,
         title: product.title,
         price: product.price || 0
       }, qty);
 
       await this.client.sendText(waId, `✅ Added ${qty}x ${product.title} to cart.`);
-      const items = await this.cartService.get(cartUserId, slug);
-      await this.client.sendInteractive(waId, buildCartMenu(slug, items.length));
+      const items = await this.cartService.get(cartUserId, targetSlug);
+      await this.client.sendInteractive(waId, buildCartMenu(targetSlug, items.length));
       return;
     }
 
     if (action === WA_ACTION.CART_VIEW) {
+      const targetSlug = parts[1] || slug;
       if (parts[2] === 'clear') {
-        await this.cartService.clear(cartUserId, slug);
+        await this.cartService.clear(cartUserId, targetSlug);
         await this.client.sendText(waId, '🗑 Cart cleared.');
       }
 
-      const items = await this.cartService.get(cartUserId, slug);
-      const total = await this.cartService.total(cartUserId, slug);
-      const retailer = await this.registry.findBySlug(slug);
+      const items = await this.cartService.get(cartUserId, targetSlug);
+      const total = await this.cartService.total(cartUserId, targetSlug);
+      const retailer = await this.registry.findBySlug(targetSlug);
       const storeName = retailer ? retailer.name : 'Store';
 
-      await this.client.sendText(waId, this.catalogFormatter.cartSummary(storeName, items, total));
-      await this.client.sendInteractive(waId, buildCartMenu(slug, items.length));
+      await this.client.sendText(waId, this.catalogFormatter.cartSummary(storeName, items, total, 'whatsapp'));
+      await this.client.sendInteractive(waId, buildCartMenu(targetSlug, items.length));
       return;
     }
 
     if (action === WA_ACTION.CHECKOUT) {
-      const items = await this.cartService.get(cartUserId, slug);
+      const targetSlug = parts[1] || slug;
+      const items = await this.cartService.get(cartUserId, targetSlug);
       if (items.length === 0) {
         return this.client.sendText(waId, 'Your cart is empty.');
       }
-      return this.handleCheckout(waId, slug);
+      return this.handleCheckout(waId, targetSlug);
     }
 
     if (action === WA_ACTION.ADDR_SELECT) {
+      const targetSlug = parts[1] || slug;
       const addressId = parseInt(parts[2], 10);
       const address = await this.prisma.whatsAppAddress.findUnique({ where: { id: addressId } });
       if (!address) return this.client.sendText(waId, 'Address error.');
 
       await this.sessionService.setSession(waId, 'main', {
-        storeSlug: slug,
+        storeSlug: targetSlug,
         step: 'payment',
         address: `${address.streetLine}, ${address.city}, ${address.province}`
       });
-      return this.showPaymentMenu(waId, slug);
+      return this.showPaymentMenu(waId, targetSlug);
     }
 
     if (action === WA_ACTION.CAT_MENU) {
-      const retailer = await this.registry.findBySlug(slug);
+      const targetSlug = parts[1] || slug;
+      const retailer = await this.registry.findBySlug(targetSlug);
       if (!retailer) return this.client.sendText(waId, 'Store not found.');
-      return this.client.sendInteractive(waId, buildStoreMainMenu(retailer.name, slug));
+      return this.client.sendInteractive(waId, buildStoreMainMenu(retailer.name, targetSlug));
     }
 
     if (action === WA_ACTION.ADDR_NEW) {
-      await this.sessionService.setSession(waId, 'main', { storeSlug: slug, step: 'collect:name' });
+      const targetSlug = parts[1] || slug;
+      await this.sessionService.setSession(waId, 'main', { storeSlug: targetSlug, step: 'collect:name' });
       return this.client.sendText(waId, 'Sure! Let\'s setup a new delivery address.\n\nFirst, what is your *Full Name*?');
     }
 
     if (action === 'pay_sel') {
+      const targetSlug = parts[1] || slug;
       const method = parts[2];
       const session = await this.sessionService.getSession<any>(waId, 'main');
       await this.sessionService.setSession(waId, 'main', { ...session, paymentMethod: method, step: 'confirm' });
 
-      const items = await this.cartService.get(cartUserId, slug);
-      const total = await this.cartService.total(cartUserId, slug);
-      const summary = this.catalogFormatter.cartSummary('Review Order', items, total);
+      const items = await this.cartService.get(cartUserId, targetSlug);
+      const total = await this.cartService.total(cartUserId, targetSlug);
+      const summary = this.catalogFormatter.cartSummary('Review Order', items, total, 'whatsapp');
 
       const confirmText = `${summary}\n\n📍 *Delivery Address:*\n${session.address}\n\n💳 *Payment:*\n${method.toUpperCase()}\n\nReply with "place order" to confirm!`;
       return this.client.sendText(waId, confirmText);

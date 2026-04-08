@@ -167,8 +167,9 @@ export class AiChatService {
     userMessage: string,
     config: StoreAiConfig,
     conversationId?: number,
+    platform: 'telegram' | 'whatsapp' = 'telegram',
   ): Promise<ChatResult> {
-    this.logger.log(`[AiChat] Message from user ${userId} for store ${storeSlug}: "${userMessage}"`);
+    this.logger.log(`[AiChat] Message from user ${userId} for store ${storeSlug} on ${platform}: "${userMessage}"`);
 
     // ── Load history from DB if conversation exists ──────────────────────────
     let history: Anthropic.MessageParam[] = [];
@@ -186,11 +187,11 @@ export class AiChatService {
 
     let result: ChatResult;
     if (config.provider === 'gemini') {
-      result = await this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
+      result = await this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history, platform);
     } else if (config.provider === 'openai') {
-      result = await this.chatOpenAi(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
+      result = await this.chatOpenAi(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history, platform);
     } else {
-      result = await this.chatClaude(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history);
+      result = await this.chatClaude(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history, platform);
     }
 
     // ── Unified Logging: Log AI reply ──
@@ -211,14 +212,19 @@ export class AiChatService {
     config: StoreAiConfig,
     conversationId?: number,
     history: Anthropic.MessageParam[] = [],
+    platform: 'telegram' | 'whatsapp' = 'telegram',
   ): Promise<ChatResult> {
     const client = new Anthropic({ apiKey: config.apiKey });
     const model  = config.model || (await this.getDefaultModel('claude'));
 
+    const formatNote = platform === 'whatsapp'
+      ? `Format responses for WhatsApp: use *bold*, _italic_, and \`\`\`code\`\`\`. DO NOT use HTML tags.`
+      : `Format responses for Telegram: use <b>bold</b>, <i>italic</i>, and <code>code</code>.`;
+
     const system = config.systemPrompt?.trim() ||
       `You are a friendly shopping assistant for "${storeName}". ` +
       `Help customers find products, answer questions about pricing, stock, and promotions. ` +
-      `Use your tools to look up real store data. Format responses concisely for Telegram. ` +
+      `Use your tools to look up real store data. ${formatNote} ` +
       `Use ₱ for prices.`;
 
     const messages: Anthropic.MessageParam[] = [...history, { role: 'user', content: userMessage }];
@@ -286,15 +292,21 @@ export class AiChatService {
     config: StoreAiConfig,
     conversationId?: number,
     history: Anthropic.MessageParam[] = [],
+    platform: 'telegram' | 'whatsapp' = 'telegram',
   ): Promise<ChatResult> {
     const genAI = new GoogleGenerativeAI(config.apiKey);
     const modelName = config.model || (await this.getDefaultModel('gemini'));
+
+    const formatNote = platform === 'whatsapp'
+      ? `Format responses for WhatsApp: use *bold*, _italic_, and \`\`\`code\`\`\`. DO NOT use HTML tags.`
+      : `Format responses for Telegram: use <b>bold</b>, <i>italic</i>, and <code>code</code>.`;
+
     const model = genAI.getGenerativeModel({
       model: modelName,
       systemInstruction: config.systemPrompt?.trim() ||
         `You are a friendly shopping assistant for "${storeName}". ` +
         `Help customers find products, answer questions about pricing, stock, and promotions. ` +
-        `Use your tools to look up real store data. Format responses concisely for Telegram. ` +
+        `Use your tools to look up real store data. ${formatNote} ` +
         `Use ₱ for prices.`,
       tools: [{ functionDeclarations: GEMINI_TOOLS }],
     });
@@ -371,15 +383,20 @@ export class AiChatService {
     config: StoreAiConfig,
     conversationId?: number,
     history: Anthropic.MessageParam[] = [],
+    platform: 'telegram' | 'whatsapp' = 'telegram',
   ): Promise<ChatResult> {
     const client = new OpenAI({ apiKey: config.apiKey });
     const model  = config.model || (await this.getDefaultModel('openai'));
     const deadline = Date.now() + 30_000;
 
+    const formatNote = platform === 'whatsapp'
+      ? `Format responses for WhatsApp: use *bold*, _italic_, and \`\`\`code\`\`\`. DO NOT use HTML tags.`
+      : `Format responses for Telegram: use <b>bold</b>, <i>italic</i>, and <code>code</code>.`;
+
     const system = config.systemPrompt?.trim() ||
       `You are a friendly shopping assistant for "${storeName}". ` +
       `Help customers find products, answer questions about pricing, stock, and promotions. ` +
-      `Use your tools to look up real store data. Format responses concisely for Telegram. ` +
+      `Use your tools to look up real store data. ${formatNote} ` +
       `Use ₱ for prices.`;
 
     // OpenAI tool definitions (function calling)
