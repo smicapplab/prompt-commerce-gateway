@@ -191,24 +191,47 @@
 
     // ── Suggestion click ─────────────────────────────────────────────────────
     suggestionsDiv.addEventListener('mousedown', handleSuggestionPick);
-    suggestionsDiv.addEventListener('touchstart', handleSuggestionPick, { passive: true });
+    suggestionsDiv.addEventListener('touchstart', handleSuggestionPick, { passive: false });
+    suggestionsDiv.addEventListener('click', handleSuggestionPick);
 
     async function handleSuggestionPick(e) {
       const item = e.target.closest('.suggestion-item');
-      if (!item || !Place) return;
+      if (!item) return;
+
+      // Prevent the input blur from hiding the div before we can process the click
+      if (e.type === 'mousedown' || e.type === 'touchstart') {
+        e.preventDefault();
+      }
+      
+      // If it's a click event, we process it. If mousedown/touchstart, we only prevent default 
+      // to keep focus, but let the click event (which follows) do the work.
+      // Actually, to be safe across all devices, let's process in all types but guard against double-processing.
+      if (item.getAttribute('data-processing') === 'true') return;
+      item.setAttribute('data-processing', 'true');
+      setTimeout(() => item.removeAttribute('data-processing'), 500);
 
       const placeId     = item.dataset.placeId;
       const description = item.dataset.description;
+
+      console.log('Suggestion picked:', { placeId, description });
+
+      if (!Place) {
+        console.error('Place library not loaded yet');
+        return;
+      }
 
       // Show selected text immediately
       input.value = description;
       suggestionsDiv.classList.add('hidden');
 
       try {
+        console.log('Fetching details for:', placeId);
         const place = new Place({ id: placeId });
         await place.fetchFields({
           fields: ['addressComponents', 'location', 'formattedAddress'],
         });
+
+        console.log('Details fetched:', place);
 
         // Rotate session token
         sessionToken = new google.maps.AutocompleteSessionToken();
@@ -220,7 +243,7 @@
         confirmBtn.disabled = false;
       } catch (err) {
         console.error('Fetch place details failed:', err);
-        input.value = '';
+        // Don't clear input here so the user can see what they picked even if details fail
       }
     }
 
