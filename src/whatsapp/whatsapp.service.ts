@@ -311,6 +311,7 @@ export class WhatsAppService implements OnModuleInit {
             lat: session.lat,
             lng: session.lng,
             confirm: true,
+            delivery_type: session.deliveryType || 'delivery',
             payment_provider: session.paymentMethod
           }
         ) as { content: any[] };
