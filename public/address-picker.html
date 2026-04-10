@@ -73,6 +73,23 @@
     const channel = '__CHANNEL__';
     const apiKey  = '__API_KEY__';
 
+    function showError(msg) {
+      document.body.innerHTML = `
+        <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center">
+          <div class="bg-red-100 p-4 rounded-full mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+          <h1 class="text-2xl font-bold text-gray-900 mb-2">Something went wrong</h1>
+          <p class="text-gray-600 mb-6">${msg}</p>
+          <button onclick="location.reload()" class="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200">
+            Try Again
+          </button>
+        </div>
+      `;
+    }
+
     if (!apiKey || apiKey === '__API_KEY__' || apiKey === '') {
       console.warn('Google Maps API Key is missing or invalid in address picker.');
       // Show error in UI for the user/admin to see
@@ -267,23 +284,6 @@
         }
       }
     });
-
-    function showError(msg) {
-      document.body.innerHTML = `
-        <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center">
-          <div class="bg-red-100 p-4 rounded-full mb-4">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </div>
-          <h1 class="text-2xl font-bold text-gray-900 mb-2">Something went wrong</h1>
-          <p class="text-gray-600 mb-6">${msg}</p>
-          <button onclick="location.reload()" class="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200">
-            Try Again
-          </button>
-        </div>
-      `;
-    }
 
     // ── Cancel ───────────────────────────────────────────────────────────────
     cancelBtn.addEventListener('click', () => {
