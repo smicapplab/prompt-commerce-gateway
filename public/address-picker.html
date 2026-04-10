@@ -73,6 +73,9 @@
     const channel = '__CHANNEL__';
     const apiKey  = '__API_KEY__';
 
+    // Fix: define initMaps globally for the Google Maps callback
+    window.initMaps = init;
+
     function showError(msg) {
       document.body.innerHTML = `
         <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center">
@@ -90,7 +93,10 @@
       `;
     }
 
-    if (!apiKey || apiKey === '__API_KEY__' || apiKey === '') {
+    // Improved API key validation
+    const isApiKeyMissing = !apiKey || apiKey === '__' + 'API_KEY' + '__' || apiKey === '';
+    
+    if (isApiKeyMissing) {
       console.warn('Google Maps API Key is missing or invalid in address picker.');
       // Show error in UI for the user/admin to see
       setTimeout(() => {
@@ -114,13 +120,18 @@
 
     // Load libraries using the new loader
     async function init() {
-      const { AutocompleteSessionToken, AutocompleteSuggestion: AS } = await google.maps.importLibrary("places");
-      const { Place: P } = await google.maps.importLibrary("places");
-      
-      AutocompleteSuggestion = AS;
-      Place = P;
-      sessionToken = new AutocompleteSessionToken();
-      console.log('Google Maps New Places Library loaded');
+      try {
+        const { AutocompleteSessionToken, AutocompleteSuggestion: AS } = await google.maps.importLibrary("places");
+        const { Place: P } = await google.maps.importLibrary("places");
+        
+        AutocompleteSuggestion = AS;
+        Place = P;
+        sessionToken = new AutocompleteSessionToken();
+        console.log('Google Maps New Places Library loaded');
+      } catch (err) {
+        console.error('Failed to initialize Google Maps libraries:', err);
+        // Don't show full error UI yet, maybe it's just a transient network issue
+      }
     }
 
     // ── Suggestion rendering ─────────────────────────────────────────────────
