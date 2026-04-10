@@ -71,6 +71,12 @@
   <script>
     const token   = '__TOKEN__';
     const channel = '__CHANNEL__';
+    const apiKey  = '__API_KEY__';
+
+    if (!apiKey || apiKey === '__API_KEY__' || apiKey === '') {
+      console.warn('Google Maps API Key is missing or invalid in address picker.');
+    }
+    
     let selectedPlace   = null;
     let autocompleteService = null;
     let placesService       = null;
@@ -87,6 +93,7 @@
 
     // Called by Maps JS API once fully loaded
     window.initMaps = function () {
+      console.log('Google Maps API initialized');
       autocompleteService = new google.maps.places.AutocompleteService();
       // PlacesService requires a map or a div element
       placesService = new google.maps.places.PlacesService(document.createElement('div'));
@@ -143,6 +150,7 @@
             if (status === google.maps.places.PlacesServiceStatus.OK) {
               showSuggestions(predictions);
             } else {
+              console.error('Autocomplete failed:', status);
               suggestionsDiv.classList.add('hidden');
             }
           }

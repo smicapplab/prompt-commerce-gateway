@@ -1155,7 +1155,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!state) return;
 
     // ── Address Picker (Mini App) ──
-    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY || await this.settings.get('google_places_api_key');
     const gatewayUrl = await this.settings.get('gateway_public_url') || 'http://localhost:3002';
 
     if (apiKey) {
@@ -1419,7 +1419,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       const retailer = await this.getRetailer(slug);
       // M7: Escape buyer data before passing to MCP to prevent XSS in seller admin
-      const notes = `Name: ${esc(state.name)}, Email: ${esc(state.email)}, Address: ${esc(state.address)}`;
+      const buyerName = esc(state.name);
+      const buyerEmail = esc(state.email);
+      const deliveryAddress = esc(state.address);
       const orderItems = items.map(i => ({ product_id: i.productId, quantity: i.quantity }));
 
       try {
@@ -1434,8 +1436,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const result = await callRetailerTool(retailer, 'create_order', {
         items: orderItems,
         buyer_ref: userId,
+        buyer_name: buyerName,
+        buyer_email: buyerEmail,
+        delivery_address: deliveryAddress,
         channel: 'telegram',
-        notes,
+        notes: '', // No combined notes anymore, we have structured fields
         lat: state.lat,
         lng: state.lng,
         confirm: true,

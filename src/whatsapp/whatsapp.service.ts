@@ -294,6 +294,8 @@ export class WhatsAppService implements OnModuleInit {
       const retailer = await this.registry.findBySlug(slug);
       if (!retailer) return this.client.sendText(waId, 'Store error.');
 
+      const user = await this.prisma.whatsAppUser.findUnique({ where: { id: waId } });
+
       try {
         // 1. Create order on Seller Server via MCP
         const mcpRes = await callRetailerTool(
@@ -306,8 +308,11 @@ export class WhatsAppService implements OnModuleInit {
           {
             items: items.map(i => ({ product_id: i.productId, quantity: i.quantity })),
             buyer_ref: waId,
+            buyer_name: session.name,
+            buyer_email: user?.savedEmail || '',
+            delivery_address: session.address,
             channel: 'whatsapp',
-            notes: `Buyer: ${session.name}\nAddress: ${session.address}`,
+            notes: '', // No combined notes anymore, we have structured fields
             lat: session.lat,
             lng: session.lng,
             confirm: true,
@@ -820,7 +825,7 @@ export class WhatsAppService implements OnModuleInit {
   }
 
   private async promptNewAddress(waId: string, slug: string) {
-    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY || await this.settings.get('google_places_api_key');
     const session = await this.sessionService.getSession<any>(waId, 'main');
 
     if (apiKey) {

@@ -44,7 +44,7 @@ export class AddressPickerController implements OnModuleInit {
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).send('Configuration error: template missing');
     }
 
-    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY || await this.settings.get('google_places_api_key');
 
     // Inject data into cached template
     const html = this.htmlTemplate
