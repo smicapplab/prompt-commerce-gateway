@@ -179,7 +179,6 @@
           const { suggestions } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({
             input: query,
             includedRegionCodes: ['ph'],
-            includedPrimaryTypes: ['address'],
             sessionToken,
           });
           showSuggestions(suggestions);
@@ -325,6 +324,6 @@
   </script>
 
   <!-- Maps loaded async with callback — no race condition, no pac-container -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=__API_KEY__&libraries=places&callback=initMaps" async defer></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=__API_KEY__&libraries=places&callback=initMaps&loading=async" async defer></script>
 </body>
 </html>
