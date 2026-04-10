@@ -75,6 +75,10 @@
 
     if (!apiKey || apiKey === '__API_KEY__' || apiKey === '') {
       console.warn('Google Maps API Key is missing or invalid in address picker.');
+      // Show error in UI for the user/admin to see
+      setTimeout(() => {
+        showError('Google Maps configuration is missing. Please add your API Key in the Seller Admin Settings.');
+      }, 500);
     }
     
     let selectedPlace   = null;
