@@ -20,7 +20,6 @@ export const WA_ACTION = {
   PAY_SEL: 'pay_sel',
   PREV_PAGE: 'prev_page',
   NEXT_PAGE: 'next_page',
-  QTY_SEL: 'qty_sel',
 };
 
 // ─── Welcome / Store Selection ──────────────────────────────────────────────
