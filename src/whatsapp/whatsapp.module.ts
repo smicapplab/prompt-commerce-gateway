@@ -6,6 +6,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { TelegramModule } from '../telegram/telegram.module'; // for CartService, AiChatService reuse
 import { ChatModule } from '../chat/chat.module';
 import { PaymentModule } from '../payments/payment.module';
+import { AddressPickerModule } from '../address-picker/address-picker.module';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppClient } from './whatsapp-client';
@@ -17,6 +18,7 @@ import { WhatsAppSessionService } from './whatsapp-session.service';
     RegistryModule,
     SettingsModule,
     CatalogModule,
+    forwardRef(() => AddressPickerModule),
     forwardRef(() => TelegramModule),
     forwardRef(() => ChatModule),
     PaymentModule,

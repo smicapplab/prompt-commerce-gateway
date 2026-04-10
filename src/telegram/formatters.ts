@@ -98,15 +98,3 @@ export function storeMenuMessage(storeName: string): string {
     `What would you like to do?`
   );
 }
-
-// ─── AI mode greeting ─────────────────────────────────────────────────────────
-export function aiGreeting(storeName: string): string {
-  return (
-    `🤖 <b>AI Assistant — ${esc(storeName)}</b>\n\n` +
-    `Ask me anything about our products! For example:\n` +
-    `• "What do you have under ₱500?"\n` +
-    `• "Show me your best running shoes"\n` +
-    `• "Are there any promotions today?"\n\n` +
-    `Type your question below 👇`
-  );
-}

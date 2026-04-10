@@ -1,0 +1,10 @@
+model AddressPickerToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  channel   String   // 'telegram' | 'whatsapp'
+  userId    String
+  storeSlug String
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}

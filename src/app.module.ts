@@ -14,6 +14,7 @@ import { WebhookModule } from './payments/webhook.module';
 import { StorefrontModule } from './storefront/storefront.module';
 import { ChatModule } from './chat/chat.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
+import { AddressPickerModule } from './address-picker/address-picker.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
     MailModule,
     TelegramModule,
     WhatsAppModule,
+    AddressPickerModule,
     SettingsModule,
     CatalogModule,
     OrdersModule,

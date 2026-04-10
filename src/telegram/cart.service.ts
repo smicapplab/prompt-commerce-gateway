@@ -40,6 +40,14 @@ export class CartService {
     return count === 0;
   }
 
+  async getItemQty(userId: string, storeSlug: string, productId: number): Promise<number> {
+    const item = await this.prisma.cart.findUnique({
+      where: { userId_storeSlug_productId: { userId, storeSlug, productId } },
+      select: { quantity: true }
+    });
+    return item?.quantity ?? 0;
+  }
+
   // ── Write ─────────────────────────────────────────────────────────────────────
 
   async add(

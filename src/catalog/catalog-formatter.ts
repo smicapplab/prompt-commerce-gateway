@@ -3,6 +3,13 @@ import { CachedProduct, CachedCategory } from '@prisma/client';
 
 export type FormatMode = 'html' | 'whatsapp';
 
+export interface CartItem {
+  productId: number;
+  title: string;
+  price: number;
+  quantity: number;
+}
+
 @Injectable()
 export class CatalogFormatter {
   /**
@@ -94,30 +101,102 @@ export class CatalogFormatter {
   }
 
   /**
-   * Formats a cart summary
+   * Formats a product into a beautiful e-commerce card for Telegram/WhatsApp
    */
-  cartSummary(storeName: string, items: Array<{ title: string, price: number, quantity: number }>, total: number, mode: FormatMode = 'html'): string {
-    const escStore = this.esc(storeName, mode);
-    if (!items.length) {
-      return mode === 'html'
-        ? `🛒 Your cart at <b>${escStore}</b> is empty.`
-        : `🛒 Your cart at *${escStore}* is empty.`;
+  productCard(
+    product: { 
+      title: string; 
+      price: number | null; 
+      stockQuantity: number | null; 
+      description?: string | null; 
+      storeName?: string | null; 
+      sku?: string | null 
+    },
+    mode: FormatMode = 'html',
+    options: {
+      showStore?: boolean;
+      showSku?: boolean;
+      pageInfo?: string;
+    } = {}
+  ): string {
+    const title = this.esc(product.title, mode);
+    const price = this.price(product.price);
+    const badge = this.stockBadge(product.stockQuantity ?? 0);
+    
+    const bold = (s: string) => mode === 'html' ? `<b>${s}</b>` : `*${s}*`;
+    const italic = (s: string) => mode === 'html' ? `<i>${s}</i>` : `_${s}_`;
+    const code = (s: string) => mode === 'html' ? `<code>${s}</code>` : `\`\`\`${s}\`\`\``;
+
+    const lines = [
+      bold(title),
+      mode === 'html' ? '──────────────────────' : '----------------------',
+      `💰 ₱${price}  ·  📦 ${badge}`
+    ];
+
+    if (options.showSku && product.sku) {
+      lines.push(`🏷️ SKU: ${code(this.esc(product.sku, mode))}`);
     }
 
-    const lines = mode === 'html'
-      ? [`🛒 <b>Cart — ${escStore}</b>`, '']
-      : [`🛒 *Cart — ${escStore}*`, ''];
+    if (options.showStore && product.storeName) {
+      lines.push(`🏪 Store: ${italic(this.esc(product.storeName, mode))}`);
+    }
 
+    if (product.description) {
+      const desc = this.esc(product.description, mode);
+      const shortDesc = desc.length > 80 ? desc.slice(0, 77) + '...' : desc;
+      lines.push(italic(shortDesc));
+    }
+
+    if (options.pageInfo) {
+      lines.push('');
+      lines.push(italic(options.pageInfo));
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Returns a stock status badge with emoji
+   */
+  stockBadge(stock: number): string {
+    if (stock === 0) return '❌ Out of Stock';
+    if (stock <= 3) return `⚠️ Low Stock (${stock} left)`;
+    return '✅ In Stock';
+  }
+
+  /**
+   * Formats a standardized AI greeting
+   */
+  formatAiGreeting(storeName: string, mode: FormatMode = 'html'): string {
+    const bold = (s: string) => mode === 'html' ? `<b>${s}</b>` : `*${s}*`;
+    return [
+      `🤖 ${bold(`AI Assistant — ${storeName}`)}`,
+      '',
+      `Hi! I'm the AI shopping assistant for ${storeName}. I can help you:`,
+      '• Search for products',
+      '• Answer questions about items',
+      '• Guide you through checkout',
+      '',
+      'What are you looking for today?',
+    ].join('\n');
+  }
+
+  /**
+   * Formats a cart summary for WhatsApp/Telegram
+   */
+  cartSummary(storeName: string, items: CartItem[], total: number, mode: FormatMode = 'html'): string {
+    const bold = (s: string) => mode === 'html' ? `<b>${s}</b>` : `*${s}*`;
+    
+    if (!items.length) {
+      return `🛒 Your cart at ${bold(this.esc(storeName, mode))} is empty.`;
+    }
+    
+    const lines = [`🛒 ${bold(`Cart — ${this.esc(storeName, mode)}`)}`, ''];
     for (const item of items) {
       lines.push(`• ${this.esc(item.title, mode)} × ${item.quantity} = ₱${this.price(item.price * item.quantity)}`);
     }
-
     lines.push('');
-    if (mode === 'html') {
-      lines.push(`<b>Total: ₱${this.price(total)}</b>`);
-    } else {
-      lines.push(`*Total: ₱${this.price(total)}*`);
-    }
+    lines.push(bold(`Total: ₱${this.price(total)}`));
     return lines.join('\n');
   }
 }

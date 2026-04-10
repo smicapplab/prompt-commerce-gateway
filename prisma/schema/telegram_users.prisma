@@ -14,6 +14,7 @@ model TelegramUser {
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   addresses TelegramAddress[]
+  sessions  TelegramSession[]
 
   @@map("telegram_users")
 }
@@ -28,6 +29,8 @@ model TelegramAddress {
   province   String
   postalCode String?  @map("postal_code")
   country    String   @default("Philippines")
+  lat        Float?
+  lng        Float?
   isDefault  Boolean  @default(false) @map("is_default")
   createdAt  DateTime @default(now()) @map("created_at")
 

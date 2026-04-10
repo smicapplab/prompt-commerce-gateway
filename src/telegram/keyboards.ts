@@ -57,6 +57,7 @@ export function productListKeyboard(
   catId: number | string,
   page: number,
   hasMore: boolean,
+  cartCount: number = 0,
 ): InlineKeyboard {
   const ph = (n: number | null) => n == null ? 'TBD' : `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
   const kb = new InlineKeyboard();
@@ -70,6 +71,11 @@ export function productListKeyboard(
     if (hasMore)  kb.text('Next ▶️', CB.page(slug, catId, page + 1));
     kb.row();
   }
+
+  if (cartCount > 0) {
+    kb.text(`🛒 View Cart (${cartCount})`, CB.cart(slug)).row();
+  }
+
   kb.text('⬅️ Back', CB.cats(slug));
   return kb;
 }
@@ -80,10 +86,12 @@ export function productDetailKeyboard(
   productId: number,
   catId: number | string,
   page: number,
+  cartCount: number = 0,
 ): InlineKeyboard {
+  const cartLabel = cartCount > 0 ? `🛍 View Cart (${cartCount})` : '🛍 View Cart';
   return new InlineKeyboard()
     .text('🛒 Add to Cart', CB.qty(slug, productId)).row()
-    .text('🛍 View Cart', CB.cart(slug))
+    .text(cartLabel, CB.cart(slug))
     .text('⬅️ Back', CB.page(slug, catId, page));
 }
 
@@ -92,10 +100,12 @@ export function productDetailKeyboard(
 export function productDetailSearchKeyboard(
   slug: string,
   productId: number,
+  cartCount: number = 0,
 ): InlineKeyboard {
+  const cartLabel = cartCount > 0 ? `🛍 View Cart (${cartCount})` : '🛍 View Cart';
   return new InlineKeyboard()
     .text('🛒 Add to Cart', CB.qty(slug, productId)).row()
-    .text('🛍 View Cart', CB.cart(slug))
+    .text(cartLabel, CB.cart(slug))
     .text('🔍 Back to Search', 'srch:0');
 }
 
@@ -104,10 +114,12 @@ export function productDetailSearchKeyboard(
 export function productDetailAiKeyboard(
   slug: string,
   productId: number,
+  cartCount: number = 0,
 ): InlineKeyboard {
+  const cartLabel = cartCount > 0 ? `🛍 View Cart (${cartCount})` : '🛍 View Cart';
   return new InlineKeyboard()
     .text('🛒 Add to Cart', CB.qty(slug, productId)).row()
-    .text('🛍 View Cart', CB.cart(slug))
+    .text(cartLabel, CB.cart(slug))
     .text('🤖 Back to AI Chat', CB.ai(slug));
 }
 
@@ -152,6 +164,7 @@ export function aiModeKeyboard(slug: string): InlineKeyboard {
 export function aiProductKeyboard(
   slug: string,
   products: Array<{ id: number; title: string; price: number | null }>,
+  cartCount: number = 0,
 ): InlineKeyboard {
   const ph = (n: number | null) => n == null ? 'TBD' : `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
   const kb = new InlineKeyboard();
@@ -159,7 +172,9 @@ export function aiProductKeyboard(
     const label = `${p.title.slice(0, 30)} (${ph(p.price)})`;
     kb.text(label, CB.prod(slug, p.id)).row();
   }
-  kb.text('🛒 View Cart', CB.cart(slug))
+
+  const cartLabel = cartCount > 0 ? `🛒 View Cart (${cartCount})` : '🛒 View Cart';
+  kb.text(cartLabel, CB.cart(slug))
     .text('🏪 Back to Store', CB.back(slug));
   return kb;
 }

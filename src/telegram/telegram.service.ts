@@ -8,40 +8,41 @@ import { SettingsService } from '../settings/settings.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { callRetailerTool } from '../mcp/retailer-client';
 import { AiChatService, type StoreAiConfig, type ChatResult } from './ai-chat.service';
+import { TelegramSessionService } from './telegram-session.service';
 import { CartService } from './cart.service';
 import { ConversationService } from '../chat/conversation.service';
 import { PaymentService } from '../payments/payment.service';
+import { CatalogFormatter } from '../catalog/catalog-formatter';
+import { buildAiChatFooter } from '../shared/ai-chat-shell';
+import { AddressPickerService } from '../address-picker/address-picker.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
          productListKeyboard, productDetailKeyboard, productDetailSearchKeyboard, productDetailAiKeyboard,
          cartKeyboard, emptyCartKeyboard, aiModeKeyboard, aiProductKeyboard,
          backKeyboard, quantityKeyboard } from './keyboards';
 import { esc, price, productDetail, cartSummary, orderConfirmation,
-         welcomeMessage, storeMenuMessage, aiGreeting } from './formatters';
+         welcomeMessage, storeMenuMessage } from './formatters';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 5;
 
 // ─── Checkout session state ───────────────────────────────────────────────────
 interface CheckoutState {
   storeSlug:     string;
-  step:          'name' | 'email' | 'addressList' | 'provSelect' | 'citySelect' | 'brgySelect' | 'streetType' | 'labelType' | 'address' | 'delivery' | 'payment' | 'confirm';
+  step:          'name' | 'email' | 'addressList' | 'addressPicker' | 'freeAddress' | 'labelType' | 'delivery' | 'payment' | 'confirm';
   name?:         string;
   email?:        string;
   
   // New address flow state
-  provCode?:     string;
-  cityCode?:     string;
-  brgyCode?:     string;
+  province?:     string;
+  city?:         string;
+  barangay?:     string;
   streetLine?:   string;
   addressId?:    number;
+  lat?:          number;
+  lng?:          number;
 
   address?:      string;
   deliveryType?: 'delivery' | 'pickup';
   paymentMethod?: string;  // e.g. 'cod', 'mock', 'assisted', 'paymongo', 'stripe'
-}
-
-// ─── AI session state ─────────────────────────────────────────────────────────
-interface AiState {
-  storeSlug: string;
 }
 
 @Injectable()
@@ -53,9 +54,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   // Per-user session maps (in-memory)
   private checkoutSessions = new Map<string, CheckoutState>();
-  private aiSessions       = new Map<string, AiState>();
   private searchQueries    = new Map<string, string>();  // userId → last search query
   private lastStoreSlug    = new Map<string, string>();  // userId → most recently visited store slug
+  private resultsState     = new Map<string, { messageIds: number[] }>(); // userId -> product card message IDs
 
   constructor(
     private readonly registry: RegistryService,
@@ -63,7 +64,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly catalog: CatalogService,
     private readonly aiChat: AiChatService,
     private readonly cartService: CartService,
+    private readonly telegramSession: TelegramSessionService,
     private readonly conversationService: ConversationService,
+    private readonly catalogFormatter: CatalogFormatter,
+    private readonly addressPicker: AddressPickerService,
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     @Optional() private readonly paymentService?: PaymentService,
   ) {}
@@ -254,8 +258,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       if (!userId) return;
 
       // Resolve store: active session → last viewed store → prompt user
+      const aiSession = await this.telegramSession.getSession(userId, 'ai');
       const slug =
-        this.aiSessions.get(userId)?.storeSlug ??
+        aiSession?.storeSlug ??
         this.checkoutSessions.get(userId)?.storeSlug ??
         this.lastStoreSlug.get(userId);
 
@@ -336,7 +341,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         // s:<slug> — store selected
         if (data.startsWith('s:')) {
           const slug = data.slice(2);
-          this.aiSessions.delete(userId);
+          await this.telegramSession.deleteSession(userId, 'ai');
           this.checkoutSessions.delete(userId);
           const retailer = await this.registry.findBySlug(slug);
           await ctx.editMessageText(storeMenuMessage(retailer.name), {
@@ -349,7 +354,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         // bk:<slug> — back to store menu
         if (data.startsWith('bk:')) {
           const slug = data.slice(3);
-          this.aiSessions.delete(userId);
+          await this.telegramSession.deleteSession(userId, 'ai');
           const retailer = await this.registry.findBySlug(slug);
           await this.safeEditText(ctx, storeMenuMessage(retailer.name), {
             parse_mode: 'HTML',
@@ -408,9 +413,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           const state = this.checkoutSessions.get(userId);
           if (!state) return;
           if (action === 'new') {
-            state.step = 'provSelect';
+            state.step = 'freeAddress';
             this.checkoutSessions.set(userId, state);
-            await ctx.editMessageText('📍 Great! Let\'s setup a new address. Please type your province (or region):');
+            await ctx.editMessageText('📍 Please type your full delivery address:\n<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>', { parse_mode: 'HTML' });
             return;
           }
           // Select existing
@@ -438,45 +443,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
         
-        // prov:
-        if (data.startsWith('prov:')) {
-          const code = data.slice(5);
-          const state = this.checkoutSessions.get(userId);
-          if (state?.step === 'provSelect') {
-            state.provCode = code;
-            state.step = 'citySelect';
-            this.checkoutSessions.set(userId, state);
-            await ctx.editMessageText('🏢 Got it! Now, please type your city or municipality (e.g. "Makati", "Cebu City"):');
-          }
-          return;
-        }
-
-        // city:
-        if (data.startsWith('city:')) {
-          const code = data.slice(5);
-          const state = this.checkoutSessions.get(userId);
-          if (state?.step === 'citySelect') {
-            state.cityCode = code;
-            state.step = 'brgySelect';
-            this.checkoutSessions.set(userId, state);
-            await ctx.editMessageText('🏘 Almost there! Please type your barangay:');
-          }
-          return;
-        }
-
-        // brgy:
-        if (data.startsWith('brgy:')) {
-          const code = data.slice(5);
-          const state = this.checkoutSessions.get(userId);
-          if (state?.step === 'brgySelect') {
-            state.brgyCode = code;
-            state.step = 'streetType';
-            this.checkoutSessions.set(userId, state);
-            await ctx.editMessageText('🏠 Please type your full street address (e.g. "Unit 12A, Tower 1, Avida Towers, Juan St."):');
-          }
-          return;
-        }
-
         // lbl:
         if (data.startsWith('lbl:')) {
           const lbl = data.slice(4);
@@ -563,9 +529,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         // ai:<slug> — enter AI mode
         if (data.startsWith('ai:')) {
           const slug = data.slice(3);
-          this.aiSessions.set(userId, { storeSlug: slug });
+          await this.telegramSession.setSession(userId, 'ai', { storeSlug: slug });
           const retailer = await this.registry.findBySlug(slug);
-          await this.safeEditText(ctx, aiGreeting(retailer.name), {
+          await this.safeEditText(ctx, this.catalogFormatter.formatAiGreeting(retailer.name, 'html'), {
             parse_mode: 'HTML',
             reply_markup: aiModeKeyboard(slug),
           });
@@ -606,6 +572,60 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
     });
 
+    // ── Web App Data (Address Picker) ───────────────────────────────────────
+    bot.on('message:web_app_data', async (ctx) => {
+      const userId = await this.syncUser(ctx);
+      if (!userId) return;
+
+      const state = this.checkoutSessions.get(userId);
+      if (!state) return;
+
+      try {
+        const data = JSON.parse(ctx.message.web_app_data.data);
+
+        if (data.cancelled) {
+          state.step = 'freeAddress';
+          this.checkoutSessions.set(userId, state);
+          await ctx.reply(
+            '📍 No problem! Please type your full delivery address:\n' +
+            '<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>',
+            { parse_mode: 'HTML' }
+          );
+          return;
+        }
+
+        // Standard address payload from Google Places
+        state.province = data.province;
+        state.city = data.city;
+        state.barangay = data.barangay || '';
+        state.streetLine = data.streetLine;
+        state.address = data.formattedAddress;
+        state.lat = data.lat ?? null;
+        state.lng = data.lng ?? null;
+        state.step = 'labelType';
+        this.checkoutSessions.set(userId, state);
+
+        await ctx.reply(`✅ <b>Address confirmed:</b>\n${data.formattedAddress}`, { parse_mode: 'HTML' });
+        
+        const kb = new InlineKeyboard()
+          .text('🏠 Home', 'lbl:Home')
+          .text('🏢 Office', 'lbl:Office').row()
+          .text('❌ Don\'t save, just use once', 'lbl:skip');
+        
+        await ctx.reply('💾 <b>Save Address As:</b>\n\nChoose a label, or type your own custom label (e.g. "Condo").', { parse_mode: 'HTML', reply_markup: kb });
+      } catch (err) {
+        this.logger.error(`Web App data error: ${err}`);
+        state.step = 'freeAddress';
+        this.checkoutSessions.set(userId, state);
+        await ctx.reply(
+          '⚠️ Sorry, there was an error processing your address.\n\n' +
+          'Please type your full delivery address directly in the chat:\n' +
+          '<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>',
+          { parse_mode: 'HTML' }
+        );
+      }
+    });
+
     // ── Text messages ──────────────────────────────────────────────────────
     bot.on('message:text', async (ctx) => {
       const userId = await this.syncUser(ctx);
@@ -632,11 +652,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       if (isRequestingHuman) {
         // Resolve active store session
+        const aiSession = await this.telegramSession.getSession(userId, 'ai');
         const slug =
-          this.aiSessions.get(userId)?.storeSlug ??
+          aiSession?.storeSlug ??
           this.checkoutSessions.get(userId)?.storeSlug ??
           this.lastStoreSlug.get(userId);
-
         if (slug) {
           const conv = await this.conversationService.getOrCreate(String(userId), ctx.from.first_name || 'Buyer', slug);
           if (conv.mode === 'ai') {
@@ -658,7 +678,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
 
       // AI mode
-      const aiState = this.aiSessions.get(userId);
+      const aiState = await this.telegramSession.getSession(userId, 'ai');
       if (aiState) {
         await this.handleAiMessage(ctx, userId, text, aiState.storeSlug);
         return;
@@ -688,13 +708,27 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     offset: number,
     edit = false,
   ): Promise<void> {
-    const PAGE = 8;
+    const PAGE = 5;
     const userId = ctx.from?.id.toString();
+    const chatId = ctx.chat?.id;
+
+    // ── 1. Delete previous messages if paginating (Issue 1b) ──────────────────
+    if (userId && chatId && edit) {
+      const state = this.resultsState.get(userId);
+      if (state) {
+        for (const msgId of state.messageIds) {
+          try { await this.bot!.api.deleteMessage(chatId, msgId); } catch {}
+        }
+        this.resultsState.delete(userId);
+      }
+      // Delete the pagination message itself
+      try { await ctx.deleteMessage(); } catch {}
+    }
 
     const { results, total, parsed, fallback } = await this.catalog.smartSearch(rawQuery, { limit: PAGE, offset });
     const { keywords, maxPrice, minPrice, inStockOnly } = parsed;
 
-    // ── Build header label ───────────────────────────────────────────────────
+    // ── 2. Build header/filter labels ────────────────────────────────────────
     const ph = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
     const filters: string[] = [];
     if (keywords)                 filters.push(`<b>${esc(keywords)}</b>`);
@@ -705,105 +739,103 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (inStockOnly)              filters.push('in stock');
 
     const label = filters.length ? filters.join(' · ') : 'all products';
-    const fallbackNote = fallback ? `\n<i>💡 No exact matches — showing similar results</i>` : '';
+    const fallbackNote = fallback ? '\n<i>💡 No exact matches — showing similar results</i>' : '';
 
     if (!results.length && offset === 0) {
       const msg = `🔍 No products found for ${label}.\n\nTry a different keyword or browse by /stores.`;
-      if (edit) await ctx.editMessageText(msg, { parse_mode: 'HTML' });
-      else       await ctx.reply(msg, { parse_mode: 'HTML' });
+      await ctx.reply(msg, { parse_mode: 'HTML' });
       return;
     }
 
     // Cart context for shortcut button
+    const aiSession = userId ? await this.telegramSession.getSession(userId, 'ai') : null;
     const cartSlug = userId
-      ? (this.aiSessions.get(userId)?.storeSlug ?? this.lastStoreSlug.get(userId))
+      ? (aiSession?.storeSlug ?? this.lastStoreSlug.get(userId))
       : undefined;
 
     const hasPrev = offset > 0;
     const hasNext = offset + PAGE < total;
+    const currentPage = Math.floor(offset / PAGE) + 1;
+    const totalPages = Math.ceil(total / PAGE);
 
-    // ── Rich photo card mode ──────────────────────────────────────────────────
-    // When any product has an image and this is a fresh send (not an edit),
-    // display each product as an individual photo message for an e-commerce feel.
-    const productsWithImages = results.filter((p: any) => p.images?.length > 0);
-    const usePhotoCards = !edit && productsWithImages.length > 0;
+    const newMessageIds: number[] = [];
 
-    if (usePhotoCards) {
-      // Header message
-      await ctx.reply(
-        `🛍 <b>Search results:</b> ${label}${fallbackNote}\n` +
-        `<i>${total} result${total !== 1 ? 's' : ''} across all stores</i>`,
-        { parse_mode: 'HTML' },
+    // ── 3. Render Photo Cards (Issue 1b) ──────────────────────────────────────
+    for (let i = 0; i < results.length; i++) {
+      const p = results[i];
+      
+      // Page info only on the last card
+      const pageInfo = (i === results.length - 1) 
+        ? `Page ${currentPage} of ${totalPages} · ${total} results`
+        : undefined;
+      
+      // Header info only on the first card
+      const headerPrefix = (i === 0)
+        ? `🛍 <b>Search results:</b> ${label}${fallbackNote}\n\n`
+        : '';
+
+      const caption = headerPrefix + this.catalogFormatter.productCard(
+        {
+          title: p.title,
+          price: p.price,
+          stockQuantity: p.stockQuantity,
+          description: p.description,
+          storeName: p.storeSlug,
+          sku: p.sku
+        },
+        'html',
+        { showStore: true, pageInfo }
       );
 
-      // One photo card per product
-      for (const p of results) {
-        const priceStr = p.price != null ? ph(p.price) : 'Price on request';
-        const stockBadge = p.stockQuantity === 0
-          ? '⚠️ <i>Out of stock</i>'
-          : `📦 ${p.stockQuantity} in stock`;
+      // Get cart qty for badge (Issue 1b)
+      let cartQty = 0;
+      if (userId && p.storeSlug) {
+        cartQty = await this.cartService.getItemQty(userId, p.storeSlug, p.sellerId);
+      }
+      const addLabel = cartQty > 0 ? `🛒 Add More (${cartQty})` : '🛒 Add to Cart';
 
-        const caption = [
-          `<b>${esc(p.title)}</b>`,
-          `💰 <b>${priceStr}</b>`,
-          stockBadge,
-          `🏪 <i>${esc(p.storeSlug)}</i>`,
-        ].join('\n');
+      const cardKeyboard = new InlineKeyboard()
+        .text(addLabel, CB.qty(p.storeSlug, p.sellerId))
+        .text('📋 Details', CB.prod(p.storeSlug, p.sellerId));
 
-        const cardKeyboard = new InlineKeyboard()
-          .text('🛒 Add to Cart', CB.qty(p.storeSlug, p.sellerId))
-          .text('📋 View Details', CB.prod(p.storeSlug, p.sellerId));
+      const imageUrl = await this.resolveImageUrl(p as any, p.storeSlug);
 
-        if (p.images?.length > 0) {
-          try {
-            await ctx.replyWithPhoto(p.images[0], {
-              caption,
-              parse_mode: 'HTML',
-              reply_markup: cardKeyboard,
-            });
-            continue;
-          } catch {
-            // Photo URL failed — fall through to text card below
-          }
+      let sentMsg;
+      if (imageUrl?.startsWith('http')) {
+        try {
+          sentMsg = await ctx.replyWithPhoto(imageUrl, {
+            caption,
+            parse_mode: 'HTML',
+            reply_markup: cardKeyboard,
+          });
+        } catch {
+          sentMsg = await ctx.reply(caption, { parse_mode: 'HTML', reply_markup: cardKeyboard });
         }
-        // Text card fallback
-        await ctx.reply(caption, { parse_mode: 'HTML', reply_markup: cardKeyboard });
+      } else {
+        sentMsg = await ctx.reply(caption, { parse_mode: 'HTML', reply_markup: cardKeyboard });
       }
-
-      // Navigation footer
-      const navKeyboard = new InlineKeyboard();
-      if (hasPrev) navKeyboard.text('← Prev', `srch:${offset - PAGE}`);
-      if (hasNext) navKeyboard.text('Next →', `srch:${offset + PAGE}`);
-      if (cartSlug) {
-        if (hasPrev || hasNext) navKeyboard.row();
-        navKeyboard.text('🛍 View Cart', CB.cart(cartSlug));
-      }
-      if (hasPrev || hasNext || cartSlug) {
-        const pageLabel = hasPrev || hasNext
-          ? `Page ${Math.floor(offset / PAGE) + 1} of ${Math.ceil(total / PAGE)}`
-          : '─────────────';
-        await ctx.reply(pageLabel, { reply_markup: navKeyboard });
-      }
-      return;
+      if (sentMsg) newMessageIds.push(sentMsg.message_id);
     }
 
-    // ── Fallback: compact text list (no images, or edit/pagination mode) ─────
-    const keyboard = new InlineKeyboard();
-    if (hasPrev) keyboard.text('← Prev', `srch:${offset - PAGE}`);
-    if (hasNext) keyboard.text('Next →', `srch:${offset + PAGE}`);
-    if (hasPrev || hasNext) keyboard.row();
-    for (const p of results) {
-      const priceStr = p.price != null ? `₱${p.price.toLocaleString('en-PH', { minimumFractionDigits: 0 })}` : 'TBD';
-      const stockMark = p.stockQuantity === 0 ? ' ⚠️' : '';
-      keyboard.text(`${p.title.slice(0, 33)}${stockMark} (${priceStr})`, `p:${p.storeSlug}:${p.sellerId}`).row();
+    // ── 4. Navigation footer message ──────────────────────────────────────────
+    const navKeyboard = new InlineKeyboard();
+    if (hasPrev) navKeyboard.text('← Prev', `srch:${offset - PAGE}`);
+    if (hasNext) navKeyboard.text('Next →', `srch:${offset + PAGE}`);
+    
+    if (cartSlug) {
+      if (hasPrev || hasNext) navKeyboard.row();
+      const cartItems = await this.cartService.get(userId!, cartSlug);
+      const cartLabel = cartItems.length > 0 ? `🛍 View Cart (${cartItems.length})` : '🛍 View Cart';
+      navKeyboard.text(cartLabel, CB.cart(cartSlug));
     }
-    if (cartSlug) keyboard.text('🛍 View Cart', CB.cart(cartSlug));
 
-    const text = `🔍 ${label} — ${total} result${total !== 1 ? 's' : ''} across all stores${fallbackNote}`;
-    if (edit) {
-      await this.safeEditText(ctx, text, { parse_mode: 'HTML', reply_markup: keyboard });
-    } else {
-      await ctx.reply(text, { parse_mode: 'HTML', reply_markup: keyboard });
+    if (hasPrev || hasNext || cartSlug) {
+      const footerMsg = await ctx.reply('─────────────', { reply_markup: navKeyboard });
+      newMessageIds.push(footerMsg.message_id);
+    }
+
+    if (userId) {
+      this.resultsState.set(userId, { messageIds: newMessageIds });
     }
   }
 
@@ -889,12 +921,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
 
     const syncNote = synced ? '' : '\n\n<i>💡 Sync catalog for faster browsing.</i>';
+    const userId = ctx.from?.id.toString();
+    const cartCount = userId ? (await this.cartService.get(userId, slug)).length : 0;
+
     await this.safeEditText(
       ctx,
       `<b>Products</b> (page ${page + 1})${syncNote}\n\n<i>Tap a product for details:</i>`,
       {
         parse_mode: 'HTML',
-        reply_markup: productListKeyboard(slug, pageProducts, catId, page, hasMore),
+        reply_markup: productListKeyboard(slug, pageProducts, catId, page, hasMore, cartCount),
       },
     );
   }
@@ -972,12 +1007,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // ── 4. Choose keyboard based on context ───────────────────────────────────
     // Priority: AI session > global search query > default category nav.
     let keyboard;
-    if (userId && this.aiSessions.has(userId)) {
-      keyboard = productDetailAiKeyboard(slug, productId);
+    const cartCount = userId ? (await this.cartService.get(userId, slug)).length : 0;
+    const aiSession = userId ? await this.telegramSession.getSession(userId, 'ai') : null;
+
+    if (aiSession) {
+      keyboard = productDetailAiKeyboard(slug, productId, cartCount);
     } else if (userId && this.searchQueries.has(userId)) {
-      keyboard = productDetailSearchKeyboard(slug, productId);
+      keyboard = productDetailSearchKeyboard(slug, productId, cartCount);
     } else {
-      keyboard = productDetailKeyboard(slug, productId, 'all', 0);
+      keyboard = productDetailKeyboard(slug, productId, 'all', 0, cartCount);
     }
 
     // ── 5. Show product — photo if available, plain text otherwise ────────────
@@ -1113,26 +1151,59 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private async promptAddressSelection(ctx: any, userId: string, addresses: any[] = []): Promise<void> {
     const kb = new InlineKeyboard();
-    
+    const state = this.checkoutSessions.get(userId);
+    if (!state) return;
+
+    // ── Address Picker (Mini App) ──
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    const gatewayUrl = await this.settings.get('gateway_public_url') || 'http://localhost:3002';
+
+    if (apiKey) {
+      const pickerToken = await this.addressPicker.createPickerToken('telegram', userId, state.storeSlug);
+      const webAppUrl = `${gatewayUrl}/address-picker?token=${pickerToken}`;
+      kb.webApp('📍 Enter Delivery Address', webAppUrl).row();
+    }
+
+    // Always allow free text as a fallback
+    state.step = 'freeAddress';
+    this.checkoutSessions.set(userId, state);
+
     // Sort so default is on top
     const sorted = [...addresses].sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
-    
+
     // Show top 4 saved addresses
     for (const addr of sorted.slice(0, 4)) {
       const labelBadge = addr.label ? `${addr.label} — ` : '';
       const brief = `${labelBadge}${addr.streetLine}, ${addr.city}`.slice(0, 40);
-      kb.text(`📍 ${brief}`, `addr:${addr.id}`).row();
+      kb.text(`📋 Use ${brief}`, `addr:${addr.id}`).row();
     }
-    
-    kb.text('➕ Add New Address', 'addr:new').row();
-    kb.text('❌ Cancel Checkout', `cancel:${this.checkoutSessions.get(userId)?.storeSlug}`);
 
-    await ctx.reply('🏠 <b>Delivery Address</b>\n\nWhere should we deliver your order?', {
+    // Show "Enter Manually" or "Add New Address" only if there's an alternative (API key or saved addresses)
+    if (apiKey || sorted.length > 0) {
+      const manualLabel = apiKey ? '✏️ Enter Manually' : '➕ Add New Address';
+      kb.text(manualLabel, 'addr:new').row();
+    }
+    kb.text('❌ Cancel Checkout', `cancel:${state.storeSlug}`);
+
+    let msg = '🏠 <b>Delivery Address</b>\n\n';
+    
+    if (apiKey) {
+      msg += 'Where should we deliver your order? Tap the button below to use our address picker.\n\n' +
+             '<i>Alternatively, just type your full address here and we\'ll use that.</i>';
+    } else {
+      msg += 'Please type your full delivery address:\n' +
+             '<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>';
+    }
+
+    if (sorted.length > 0) {
+      msg += '\n\nOr choose a saved address below:';
+    }
+
+    await ctx.reply(msg, {
       parse_mode: 'HTML',
       reply_markup: kb,
     });
   }
-
   private async handleCheckoutInput(
     ctx: any,
     userId: string,
@@ -1170,77 +1241,25 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (state.step === 'provSelect') {
-      const q = text.trim();
-      if (q.length < 2) {
-        await ctx.reply('⚠️ Type at least 2 letters to search.');
-        return;
-      }
-      const provinces = await this.prisma.phProvince.findMany({
-        where: { name: { contains: q, mode: 'insensitive' } },
-        take: 10,
-      });
-      if (!provinces.length) {
-        await ctx.reply('🔍 No provinces found. Try another spelling.');
-        return;
-      }
-      const kb = new InlineKeyboard();
-      for (const p of provinces) kb.text(p.name, `prov:${p.code}`).row();
-      await ctx.reply('📍 <b>Select your province:</b>', { parse_mode: 'HTML', reply_markup: kb });
-      return;
-    }
-
-    if (state.step === 'citySelect') {
-      const q = text.trim();
-      if (q.length < 2) {
-        await ctx.reply('⚠️ Type at least 2 letters to search.');
-        return;
-      }
-      const cities = await this.prisma.phCity.findMany({
-        where: { provinceCode: state.provCode, name: { contains: q, mode: 'insensitive' } },
-        take: 10,
-      });
-      if (!cities.length) {
-        await ctx.reply('🔍 No cities found for that name. Try again.');
-        return;
-      }
-      const kb = new InlineKeyboard();
-      for (const c of cities) kb.text(c.name, `city:${c.code}`).row();
-      await ctx.reply('🏢 <b>Select your city/municipality:</b>', { parse_mode: 'HTML', reply_markup: kb });
-      return;
-    }
-
-    if (state.step === 'brgySelect') {
-      const q = text.trim();
-      if (q.length < 2) {
-        await ctx.reply('⚠️ Type at least 2 letters to search.');
-        return;
-      }
-      const brgys = await this.prisma.phBarangay.findMany({
-        where: { cityCode: state.cityCode, name: { contains: q, mode: 'insensitive' } },
-        take: 10,
-      });
-      if (!brgys.length) {
-        await ctx.reply('🔍 No barangays found. Try again or type "skip" if not applicable.');
-        return;
-      }
-      const kb = new InlineKeyboard();
-      for (const b of brgys) kb.text(b.name, `brgy:${b.code}`).row();
-      await ctx.reply('🏘 <b>Select your barangay:</b>', { parse_mode: 'HTML', reply_markup: kb });
-      return;
-    }
-
-    if (state.step === 'streetType') {
+    if (state.step === 'freeAddress') {
       const trimmed = text.trim();
+      if (!trimmed || trimmed.length < 10) {
+        await ctx.reply('⚠️ Please enter a complete address (at least 10 characters).');
+        return;
+      }
       state.streetLine = trimmed;
-      state.step = 'labelType';
+      state.barangay   = '';
+      state.city       = '';
+      state.province   = '';
+      state.address    = trimmed;
+      state.step       = 'labelType';
       this.checkoutSessions.set(userId, state);
-      
+
       const kb = new InlineKeyboard()
         .text('🏠 Home', 'lbl:Home')
         .text('🏢 Office', 'lbl:Office').row()
         .text('❌ Don\'t save, just use once', 'lbl:skip');
-      await ctx.reply('💾 <b>Save Address As:</b>\n\nChoose a label, or type your own custom label (e.g. "Condo").', { parse_mode: 'HTML', reply_markup: kb });
+      await ctx.reply('💾 <b>Save Address As:</b>', { parse_mode: 'HTML', reply_markup: kb });
       return;
     }
 
@@ -1248,59 +1267,36 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.saveAndApplyAddress(ctx, userId, state, text.trim());
       return;
     }
-
-    if (state.step === 'address') {
-      // Legacy simple text address
-      const trimmed = text.trim();
-      if (!trimmed || trimmed.length > 300) {
-        await ctx.reply('⚠️ Please enter a valid address (1–300 characters).');
-        return;
-      }
-      state.address = trimmed;
-      
-      const retailer = await this.getRetailer(storeSlug);
-      if (retailer.allowsPickup) {
-        state.step = 'delivery';
-        this.checkoutSessions.set(userId, state);
-        
-        const deliveryKb = new InlineKeyboard()
-          .text('🏠 Home Delivery', `delivery:delivery:${storeSlug}`)
-          .text('🏪 Store Pickup',  `delivery:pickup:${storeSlug}`);
-          
-        await ctx.reply('🚚 How would you like to receive your order?', { reply_markup: deliveryKb });
-        return;
-      }
-
-      state.step = 'payment';
-      state.deliveryType = 'delivery';
-      this.checkoutSessions.set(userId, state);
-      await this.showPaymentSelection(ctx, storeSlug, retailer);
-      return;
-    }
   }
 
   private async saveAndApplyAddress(ctx: any, userId: string, state: CheckoutState, label: string, isEdit = false): Promise<void> {
-    const prov = await this.prisma.phProvince.findUnique({ where: { code: state.provCode! } });
-    const city = await this.prisma.phCity.findUnique({ where: { code: state.cityCode! } });
-    const brgy = await this.prisma.phBarangay.findUnique({ where: { code: state.brgyCode! } });
-    
-    // Save to DB if labeling
-    if (label) {
+    const province = state.province || '';
+    const city     = state.city     || '';
+    const barangay = state.barangay || '';
+
+    // Save to DB if labeling (don't save if label is 'skip')
+    if (label && label !== 'skip') {
+      const addressCount = await this.prisma.telegramAddress.count({
+        where: { userId }
+      });
+
       const addressRecord = await this.prisma.telegramAddress.create({
         data: {
           userId: userId,
           label: label.slice(0, 50),
           streetLine: state.streetLine!,
-          barangay: brgy?.name || '',
-          city: city?.name || '',
-          province: prov?.name || '',
+          barangay,
+          city,
+          province,
+          lat: state.lat ?? null,
+          lng: state.lng ?? null,
+          isDefault: addressCount === 0
         }
       });
       state.addressId = addressRecord.id;
     }
-    
-    state.address = [state.streetLine, brgy?.name, city?.name, prov?.name].filter(Boolean).join(', ');
-    
+
+    state.address = [state.streetLine, barangay, city, province].filter(Boolean).join(', ');
     const retailer = await this.getRetailer(state.storeSlug);
     if (retailer.allowsPickup) {
       state.step = 'delivery';
@@ -1440,6 +1436,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         buyer_ref: userId,
         channel: 'telegram',
         notes,
+        lat: state.lat,
+        lng: state.lng,
         confirm: true,
         delivery_type: state.deliveryType || 'delivery',
         payment_provider: state.paymentMethod || retailer.paymentProvider || (await this.settings.get('default_payment_provider')) || 'cod',
@@ -1755,9 +1753,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const retailer = await this.getRetailer(storeSlug);
       const result: ChatResult = await this.aiChat.chat(userId, storeSlug, store.name, retailer, text, aiConfig, conv.id);
 
+      const cartCount = (await this.cartService.get(userId, storeSlug)).length;
+      const shell = buildAiChatFooter(storeSlug, store.name, 'telegram', cartCount);
+
       const keyboard = result.products?.length
-        ? aiProductKeyboard(storeSlug, result.products)
-        : aiModeKeyboard(storeSlug);
+        ? aiProductKeyboard(storeSlug, result.products as any, cartCount)
+        : shell.telegramKeyboard;
 
       await ctx.reply(result.text, { parse_mode: 'HTML', reply_markup: keyboard });
 
@@ -1891,6 +1892,29 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       case 'paymongo':  return '💳 PayMongo';
       case 'stripe':    return '💳 Stripe';
       default:          return `💳 ${id.toUpperCase()}`;
+    }
+  }
+
+  private async resolveImageUrl(product: any, storeSlug: string): Promise<string | undefined> {
+    const images = Array.isArray(product.images) ? product.images : [];
+    let imageUrl = images[0] as string | undefined;
+
+    if (!imageUrl) return undefined;
+
+    // If it's already an absolute URL, return it
+    if (imageUrl.startsWith('http')) {
+      return imageUrl;
+    }
+
+    // Otherwise, build an absolute URL using the store's MCP server base URL
+    try {
+      const retailer = await this.registry.findBySlug(storeSlug);
+      if (!retailer || !retailer.mcpServerUrl) return undefined;
+
+      const base = retailer.mcpServerUrl.replace(/\/sse\/?$/, '').replace(/\/$/, '');
+      return `${base}/uploads/${imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl}`;
+    } catch {
+      return undefined;
     }
   }
 }
