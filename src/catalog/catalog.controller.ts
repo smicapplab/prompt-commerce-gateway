@@ -5,7 +5,6 @@ import {
 import { CatalogService, type SyncCategoryDto, type SyncProductDto, type DeltaPayload } from './catalog.service';
 import { KeysService } from '../keys/keys.service';
 import { RegistryService } from '../registry/registry.service';
-import { SettingsService } from '../settings/settings.service';
 
 // ─── Platform-key guard (shared by both endpoints) ───────────────────────────
 // The seller doesn't hold a gateway JWT — it authenticates with its platform
@@ -17,7 +16,6 @@ export class CatalogController {
     private readonly catalog: CatalogService,
     private readonly keys: KeysService,
     private readonly registry: RegistryService,
-    private readonly settings: SettingsService,
   ) {}
 
   // ── POST /api/stores/:slug/sync ─────────────────────────────────────────
