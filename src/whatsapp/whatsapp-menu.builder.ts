@@ -9,6 +9,7 @@ export const WA_ACTION = {
   PROD_SELECT: 'prod_sel',
   CART_VIEW: 'cart_view',
   CART_ADD: 'cart_add',
+  QTY_SEL: 'qty_sel',
   CHECKOUT: 'checkout',
   SEARCH: 'search',
   AI_CHAT: 'ai_chat',
@@ -107,11 +108,19 @@ export function buildSearchResultsList(
     };
   }
 
-  const rows = products.map((p) => ({
-    id: `${WA_ACTION.PROD_SELECT}:${p.storeSlug || storeSlug}:${p.sellerId}`,
-    title: p.title.substring(0, 24),
-    description: `₱${p.price || 0} · ${stockBadge(p.stockQuantity || 0)}`.substring(0, 72)
-  }));
+  const rows = products.map((p) => {
+    const priceStr = `₱${(p.price || 0).toLocaleString('en-PH')}`;
+    const badge = stockBadge(p.stockQuantity ?? 0);
+    const snippet = p.description
+      ? ' · ' + p.description.replace(/[\n\r]+/g, ' ').trim()
+      : '';
+    const desc = `${priceStr} · ${badge}${snippet}`;
+    return {
+      id: `${WA_ACTION.PROD_SELECT}:${p.storeSlug || storeSlug}:${p.sellerId}`,
+      title: p.title.substring(0, 24),
+      description: desc.substring(0, 72),
+    };
+  });
 
   // Navigation rows
   const navRows: any[] = [];
@@ -139,12 +148,16 @@ export function buildSearchResultsList(
     });
   }
 
+  const bodyText = query
+    ? `🔍 *${totalResults} result${totalResults === 1 ? '' : 's'}* for "${query.substring(0, 60)}"\n\nTap any product to see details, photo, and add to cart.`
+    : `🔍 *${totalResults} product${totalResults === 1 ? '' : 's'}* found.\n\nTap any product to see details, photo, and add to cart.`;
+
   return {
     type: 'list',
-    header: { type: 'text', text: `🔎 Results · Page ${page} of ${totalPages}`.substring(0, 60) },
-    body: { text: query ? `Found ${totalResults} products matching "${query.substring(0, 80)}".` : `Found ${totalResults} products.` },
+    header: { type: 'text', text: `🛍 Page ${page} of ${totalPages}`.substring(0, 60) },
+    body: { text: bodyText.substring(0, 1024) },
     action: {
-      button: 'View Options',
+      button: 'Browse Products',
       sections
     }
   };
@@ -168,10 +181,11 @@ export function buildSearchResultButtons(product: CachedProduct, storeSlug: stri
 
 // ─── Product Details Buttons ────────────────────────────────────────────────
 export function buildProductDetailButtons(product: CachedProduct, storeSlug: string, cartCount: number = 0, source?: string): InteractiveMessage {
+  // Route through qty picker so users can choose quantity (mirrors Telegram UX)
   const addLabel = cartCount > 0 ? `🛒 Add More (${cartCount})` : '🛒 Add to Cart';
-  
+
   const buttons = [
-    { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: addLabel.substring(0, 20) } },
+    { type: 'reply', reply: { id: `${WA_ACTION.QTY_SEL}:${storeSlug}:${product.sellerId}`, title: addLabel.substring(0, 20) } },
     { type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: '🛒 View Cart' } },
   ];
 
@@ -184,11 +198,34 @@ export function buildProductDetailButtons(product: CachedProduct, storeSlug: str
   } else {
     buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏪 Store Menu' } });
   }
-  
+
+  const inCartNote = cartCount > 0 ? `\n\n_You already have ${cartCount} in your cart._` : '';
   return {
     type: 'button',
-    body: { text: `Add ${product.title} to your cart?` },
+    body: { text: `What would you like to do with *${product.title}*?${inCartNote}` },
     action: { buttons: buttons as any }
+  };
+}
+
+// ─── Quantity Selection Menu ─────────────────────────────────────────────────
+export function buildQuantityMenu(storeSlug: string, productId: number): InteractiveMessage {
+  return {
+    type: 'list',
+    header: { type: 'text', text: 'How many would you like?' },
+    body: { text: 'Choose a quantity to add to your cart. You can always adjust it later.' },
+    action: {
+      button: 'Select Quantity',
+      sections: [
+        {
+          title: 'Quantity',
+          rows: [1, 2, 3, 5, 10].map(qty => ({
+            id: `${WA_ACTION.CART_ADD}:${storeSlug}:${productId}:${qty}`,
+            title: `${qty} ${qty === 1 ? 'item' : 'items'}`,
+            description: qty === 1 ? 'Add one to cart' : `Add ${qty} to your cart`,
+          })),
+        },
+      ],
+    },
   };
 }
 

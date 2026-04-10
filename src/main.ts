@@ -48,7 +48,7 @@ async function bootstrap(): Promise<void> {
           reqInner.rawBody = buf;
         },
       })(req, res, next);
-    } else if (req.path.startsWith('/api')) {
+    } else if (req.path.startsWith('/api') || req.path.startsWith('/address-picker')) {
       express.json({ limit: '10mb' })(req, res, next);
     } else {
       next();
@@ -68,6 +68,7 @@ async function bootstrap(): Promise<void> {
         req.path.startsWith('/whatsapp') ||
         req.path.startsWith('/payment') ||
         req.path.startsWith('/mock-pay') ||
+        req.path.startsWith('/address-picker') ||
         req.path.includes('.')
       ) {
         return next();
