@@ -48,7 +48,7 @@ export class AddressPickerController implements OnModuleInit {
 
     // Inject data into cached template
     const html = this.htmlTemplate
-      .replaceAll('__API_KEY__', apiKey || '')
+      .replace(/__API_KEY__/g, apiKey || '')
       .replace('__TOKEN__', token)
       .replace('__CHANNEL__', session.channel);
 
