@@ -20,6 +20,7 @@ import {
   buildSearchResultsList,
   buildSearchResultButtons,
   buildProductDetailButtons,
+  buildQuantityMenu,
   buildDeliveryMenu,
   buildLabelMenu,
   buildCartMenu,
@@ -637,10 +638,16 @@ export class WhatsAppService implements OnModuleInit {
       return;
     }
 
+    if (action === WA_ACTION.QTY_SEL) {
+      const targetSlug = parts[1];
+      const productId = parseInt(parts[2], 10);
+      return this.client.sendInteractive(waId, buildQuantityMenu(targetSlug, productId));
+    }
+
     if (action === WA_ACTION.CART_ADD) {
       const targetSlug = parts[1];
       const productId = parseInt(parts[2], 10);
-      const qty = parseInt(parts[3] || '1', 10);
+      const qty = Math.max(1, Math.min(99, parseInt(parts[3] || '1', 10)));
       const product = await this.prisma.cachedProduct.findUnique({
         where: { storeSlug_sellerId: { storeSlug: targetSlug, sellerId: productId } }
       });
