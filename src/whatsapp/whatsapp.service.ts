@@ -6,12 +6,14 @@ import { SettingsService } from '../settings/settings.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { AiChatService } from '../telegram/ai-chat.service';
 import { CartService } from '../telegram/cart.service';
+import { AddressPickerService } from '../address-picker/address-picker.service';
 import { ConversationService } from '../chat/conversation.service';
 import { PaymentService } from '../payments/payment.service';
 import { WhatsAppClient } from './whatsapp-client';
 import { WhatsAppSessionService } from './whatsapp-session.service';
 import { CatalogFormatter } from '../catalog/catalog-formatter';
 import { callRetailerTool } from '../mcp/retailer-client';
+import { buildAiChatFooter } from '../shared/ai-chat-shell';
 import {
   buildStoreListMenu,
   buildStoreMainMenu,
@@ -19,9 +21,9 @@ import {
   buildSearchResultButtons,
   buildProductDetailButtons,
   buildDeliveryMenu,
-  buildLocationListMenu,
   buildLabelMenu,
   buildCartMenu,
+  buildCategoryListMenu,
   buildAddressSelectMenu,
   buildPaymentMenu,
   WA_ACTION
@@ -43,6 +45,7 @@ export class WhatsAppService implements OnModuleInit {
     @Inject(forwardRef(() => AiChatService)) private readonly aiChat: AiChatService,
     @Inject(forwardRef(() => CartService)) private readonly cartService: CartService,
     @Inject(forwardRef(() => ConversationService)) private readonly conversationService: ConversationService,
+    @Inject(forwardRef(() => AddressPickerService)) private readonly addressPicker: AddressPickerService,
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     private readonly client: WhatsAppClient,
     private readonly sessionService: WhatsAppSessionService,
@@ -71,11 +74,11 @@ export class WhatsAppService implements OnModuleInit {
     if (!this.client.isConfigured()) return;
 
     // Verify Meta signature to reject spoofed/tampered webhooks
-    // Use the raw buffer if provided (set in main.ts), fallback to stringifying payload
     const rawBody = rawBodyBuffer ? rawBodyBuffer.toString('utf8') : (typeof payload === 'string' ? payload : JSON.stringify(payload));
 
-    if (signature && !this.client.verifySignature(rawBody, signature)) {
-      this.logger.warn('Webhook signature mismatch — request rejected.');
+    const isDev = process.env.NODE_ENV === 'development';
+    if (!isDev && (!signature || !this.client.verifySignature(rawBody, signature))) {
+      this.logger.warn('Missing or invalid webhook signature — request rejected.');
       return;
     }
 
@@ -153,8 +156,22 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
-  private async routeMessage(waId: string, name: string, text: string, messageId: string) {
-    this.logger.log(`Received text message from ${waId}: ${text}`);
+  private async routeMessage(waId: string, name: string, text: string, messageId: string, page = 1) {
+    this.logger.log(`Received text message from ${waId}: ${text} (page ${page})`);
+    const cartUserId = `wa:${waId}`;
+
+    const session = await this.sessionService.getSession<any>(waId, 'main');
+
+    // ── Gap 3c: Human Handover Keyword Detection ────────────────────────────
+    const HUMAN_KEYWORDS = ['/human', 'talk to agent', 'human please', 'speak to person', 'real person', 'live agent'];
+    const wantsHuman = HUMAN_KEYWORDS.some(kw => text.toLowerCase().includes(kw));
+
+    if (wantsHuman && session?.storeSlug) {
+      const conv = await this.conversationService.getOrCreate(String(waId), name || 'Buyer', session.storeSlug, 'whatsapp');
+      await this.conversationService.setMode(conv.id, 'human');
+      await this.client.sendText(waId, `👤 Connecting you to a human agent. Please hold on — someone will be with you shortly.\n\nType "exit" at any time to leave AI chat.`);
+      return;
+    }
 
     // Command overrides
     if (text.toLowerCase() === '/start' || text.toLowerCase() === 'menu' || text.toLowerCase() === 'hi' || text.toLowerCase() === 'hello') {
@@ -165,15 +182,13 @@ export class WhatsAppService implements OnModuleInit {
         // Auto-select single store
         const store = activeRetailers[0];
         await this.sessionService.setSession(waId, 'main', { storeSlug: store.slug });
-        return this.client.sendInteractive(waId, buildStoreMainMenu(store.name, store.slug));
+        return this.showStoreMainMenu(waId, store.slug, session);
       } else {
         await this.sessionService.deleteSession(waId, 'main');
         const storeMap = activeRetailers.map(r => ({ slug: r.slug, name: r.name }));
         return this.client.sendInteractive(waId, buildStoreListMenu(storeMap));
       }
     }
-
-    const session = await this.sessionService.getSession<any>(waId, 'main');
     
     // ── Unified Logging: Log buyer message ──
     if (session?.storeSlug) {
@@ -201,7 +216,8 @@ export class WhatsAppService implements OnModuleInit {
     }
 
     if (session?.step === 'collect:email') {
-      if (!text.includes('@') || !text.includes('.')) {
+      const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+      if (!emailRe.test(text.trim().toLowerCase()) || text.trim().length > 254) {
         return this.client.sendText(waId, '⚠️ Please enter a valid email address.');
       }
 
@@ -210,69 +226,36 @@ export class WhatsAppService implements OnModuleInit {
         data: { savedEmail: text.trim() }
       });
 
-      // Start province selection
-      await this.sessionService.setSession(waId, 'main', { ...session, step: 'provSelect' });
-      return this.client.sendText(waId, '📍 Great! Let\'s setup your delivery address.\n\nPlease type your *Province* or *Region* (e.g. "Metro Manila", "Cebu"):');
+      return this.promptNewAddress(waId, session.storeSlug);
     }
 
-    if (session?.step === 'provSelect') {
-      const provinces = await this.prisma.phProvince.findMany({
-        where: { name: { contains: text, mode: 'insensitive' } },
-        take: 10
+    if (session?.step === 'freeAddress') {
+      const trimmed = text.trim();
+      if (!trimmed || trimmed.length < 10) {
+        return this.client.sendText(waId, '⚠️ Please enter a complete address (at least 10 characters).');
+      }
+      await this.sessionService.setSession(waId, 'main', {
+        ...session,
+        streetLine: trimmed,
+        barangay: '',
+        city: '',
+        province: '',
+        address: trimmed,
+        step: 'labelType',
       });
-
-      if (provinces.length === 0) {
-        return this.client.sendText(waId, '🔍 No provinces found matching that name. Please try another spelling:');
-      }
-
-      return this.client.sendInteractive(waId, buildLocationListMenu(session.storeSlug, 'province', provinces));
-    }
-
-    if (session?.step === 'citySelect') {
-      const cities = await this.prisma.phCity.findMany({
-        where: { 
-          provinceCode: session.provCode, 
-          name: { contains: text, mode: 'insensitive' } 
-        },
-        take: 10
-      });
-
-      if (cities.length === 0) {
-        return this.client.sendText(waId, '🔍 No cities found in this province matching that name. Please try again:');
-      }
-
-      return this.client.sendInteractive(waId, buildLocationListMenu(session.storeSlug, 'city', cities));
-    }
-
-    if (session?.step === 'brgySelect') {
-      if (text.toLowerCase() === 'skip') {
-        await this.sessionService.setSession(waId, 'main', { ...session, brgyCode: null, step: 'streetType' });
-        return this.client.sendText(waId, '🏠 Please type your *Full Street Address* (e.g. "Unit 12A, Tower 1, Avida Towers, Juan St."):');
-      }
-
-      const brgys = await this.prisma.phBarangay.findMany({
-        where: { 
-          cityCode: session.cityCode, 
-          name: { contains: text, mode: 'insensitive' } 
-        },
-        take: 10
-      });
-
-      if (brgys.length === 0) {
-        return this.client.sendText(waId, '🔍 No barangays found. Try again or type "skip" to proceed:');
-      }
-
-      return this.client.sendInteractive(waId, buildLocationListMenu(session.storeSlug, 'barangay', brgys));
-    }
-
-    if (session?.step === 'streetType') {
-      await this.sessionService.setSession(waId, 'main', { ...session, streetLine: text.trim(), step: 'labelType' });
       return this.client.sendInteractive(waId, buildLabelMenu(session.storeSlug));
+    }
+
+    if (session?.step === 'labelType') {
+      const label = text.trim();
+      if (label.length < 1 || label.length > 30) {
+        return this.client.sendText(waId, '⚠️ Label must be 1–30 characters. Or tap a button above.');
+      }
+      return this.saveAndApplyAddress(waId, session, label);
     }
 
     if (session?.step === 'confirm' && text.toLowerCase().includes('place order')) {
       const slug = session.storeSlug;
-      const cartUserId = `wa:${waId}`;
       const items = await this.cartService.get(cartUserId, slug);
 
       if (!items.length) return this.client.sendText(waId, 'Your cart is empty.');
@@ -294,6 +277,8 @@ export class WhatsAppService implements OnModuleInit {
             buyer_ref: waId,
             channel: 'whatsapp',
             notes: `Buyer: ${session.name}\nAddress: ${session.address}`,
+            lat: session.lat,
+            lng: session.lng,
             confirm: true,
             payment_provider: session.paymentMethod
           }
@@ -334,7 +319,7 @@ export class WhatsAppService implements OnModuleInit {
               type: 'button',
               body: { text: finalMsg },
               action: {
-                buttons: [{ type: 'reply', reply: { id: `pay:${orderId}`, title: 'Pay Now 💳' } }]
+                buttons: [{ type: 'reply', reply: { id: `pay:${slug}:${orderId}`, title: 'Pay Now 💳' } }]
               }
             });
           }
@@ -396,7 +381,9 @@ export class WhatsAppService implements OnModuleInit {
         'whatsapp'
       );
 
-      this.client.sendText(waId, '...'); 
+      // Fire-and-forget thinking indicator (WhatsApp has no native disappearing indicator)
+      this.client.sendText(waId, '🤔 Got it, let me look into that...')
+        .catch(err => this.logger.warn(`Thinking indicator failed: ${err.message}`));
 
       try {
         const result = await this.aiChat.chat(
@@ -410,106 +397,188 @@ export class WhatsAppService implements OnModuleInit {
           'whatsapp'
         );
 
-        return this.client.sendText(waId, result.text);
+        // 1. Send AI text reply
+        await this.client.sendText(waId, result.text);
+
+        const cartCount = (await this.cartService.get(cartUserId, session.storeSlug)).length;
+
+        // 2. If AI returned products, show as interactive list (Gap 3a)
+        if (result.products && result.products.length > 0) {
+          const list = buildSearchResultsList(result.products as any, session.storeSlug, {
+            query: text,
+            cartCount
+          });
+          await this.client.sendInteractive(waId, list);
+        }
+
+        // 3. Always show AI chat footer/navigation (Issue 4c)
+        const shell = buildAiChatFooter(session.storeSlug, retailer.name, 'whatsapp', cartCount);
+        if (shell.whatsAppButtons) {
+          await this.client.sendInteractive(waId, shell.whatsAppButtons);
+        }
+        return;
       } catch (err: any) {
         this.logger.error(`AI Chat failed: ${err.message}`);
         return this.client.sendText(waId, 'Sorry, my AI isn\'t available right now.');
       }
     }
 
-    // Natural Language Search!
-    this.client.sendText(waId, `🔎 Searching "${text}"...`);
+    // Natural Language Search! (Fire-and-forget searching indicator)
+    const safeText = text.replace(/[*_~`]/g, '');
+    this.client.sendText(waId, `🔎 Searching "${safeText}"...${page > 1 ? ` (Page ${page})` : ''}`)
+      .catch(err => this.logger.warn(`Searching indicator failed: ${err.message}`));
 
     // Fall back to catalog smart search
-    const { results } = await this.catalog.smartSearch(text);
+    const PAGE_SIZE = 10;
+    const offset = (page - 1) * PAGE_SIZE;
+    const { results, total } = await this.catalog.smartSearch(text, { 
+      limit: PAGE_SIZE, 
+      offset,
+      storeSlug: session?.storeSlug
+    });
     
-    // Filter results: if session has storeSlug, only show that store's results. 
-    // Otherwise show all results.
-    const storeResults = session?.storeSlug 
-      ? results.filter(r => r.storeSlug === session.storeSlug).slice(0, 5)
-      : results.slice(0, 5);
+    const storeResults = results;
 
-    if (storeResults.length === 0) {
+    if (storeResults.length === 0 && page === 1) {
       if (!session?.storeSlug) {
-        return this.client.sendText(waId, `🔍 No products found for "${text}" across all stores.`);
+        return this.client.sendText(waId, `🔍 No products found for "${safeText}" across all stores.`);
       } else {
-        return this.client.sendText(waId, `🔍 No products found for "${text}" in this store. Type "menu" to change stores.`);
+        return this.client.sendText(waId, `🔍 No products found for "${safeText}" in this store. Type "menu" to change stores.`);
       }
     }
 
-    // Send visual cards (One image + text per product for "photo card" feel)
-    for (const p of storeResults) {
-      const retailer = await this.registry.findBySlug(p.storeSlug);
-      
-      // Use short detail for search results
-      const caption = this.catalogFormatter.productShortDetail(p, !session?.storeSlug ? retailer?.name : undefined, 'whatsapp');
-      const imageUrl = await this.resolveImageUrl(p, p.storeSlug);
+    // New approach: Send ONE interactive list instead of multiple cards (Issue 1c)
+    const cartCount = session?.storeSlug ? (await this.cartService.get(cartUserId, session.storeSlug)).length : 0;
+    const list = buildSearchResultsList(storeResults as any, session?.storeSlug || 'all', { 
+      query: text,
+      page,
+      totalPages: Math.ceil(total / PAGE_SIZE),
+      totalResults: total,
+      cartCount
+    });
 
-      if (imageUrl) {
-        try {
-          await this.client.sendImage(waId, imageUrl, caption);
-        } catch (err) {
-          await this.client.sendText(waId, caption);
-        }
-      } else {
-        await this.client.sendText(waId, caption);
-      }
-      
-      // Send interactive buttons for search result (View Details, Add to Cart)
-      await this.client.sendInteractive(waId, buildSearchResultButtons(p, p.storeSlug));
+    if (session) {
+      await this.sessionService.setSession(waId, 'main', { ...session, source: 'search', lastQuery: text });
     }
 
-    if (storeResults.length > 1) {
-       await this.client.sendText(waId, `👆 Showing top ${storeResults.length} results.`);
-    }
+    return this.client.sendInteractive(waId, list);
   }
 
-  private async routeInteractive(waId: string, payload: string) {
+  private async routeInteractive(waId: string, payload: string): Promise<any> {
     this.logger.log(`Received interactive click from ${waId}: ${payload}`);
     const parts = payload.split(':');
     const action = parts[0];
+    const cartUserId = `wa:${waId}`;
+
+    if (action === 'start') {
+      await this.sessionService.deleteSession(waId, 'main');
+      const retailers = await this.registry.findActiveRetailers();
+      if (retailers.length === 1) {
+        await this.sessionService.setSession(waId, 'main', { storeSlug: retailers[0].slug });
+        return this.showStoreMainMenu(waId, retailers[0].slug);
+      }
+      return this.client.sendInteractive(waId,
+        buildStoreListMenu(retailers.map(r => ({ slug: r.slug, name: r.name }))));
+    }
 
     // Example payload: store_sel:my-store
     // Example payload: prod_sel:my-store:123
 
-    if (action === WA_ACTION.STORE_SELECT) {
-      const storeSlug = parts[1];
-      const retailer = await this.registry.findBySlug(storeSlug);
-      if (!retailer) return this.client.sendText(waId, 'Store not found.');
-
-      await this.sessionService.setSession(waId, 'main', { storeSlug });
-      await this.client.sendInteractive(waId, buildStoreMainMenu(retailer.name, storeSlug));
-      return;
+    if (action === WA_ACTION.STORE_SELECT || action === WA_ACTION.STORE_MENU || action === 'store' || action === 'store_menu') {
+      const targetSlug = parts[1];
+      if (!targetSlug) return this.client.sendText(waId, 'Store selection error. Please try /start.');
+      await this.sessionService.setSession(waId, 'main', { storeSlug: targetSlug });
+      return this.showStoreMainMenu(waId, targetSlug);
     }
 
-    const session = await this.sessionService.getSession<PlatformSession & { step?: string }>(waId, 'main');
+    if (action === 'pay') {
+      const targetSlug = parts[1];
+      const orderId = parseInt(parts[2], 10);
+      
+      // Fallback for legacy ID format if needed
+      const finalSlug = orderId ? targetSlug : (await this.sessionService.getSession<any>(waId, 'main'))?.storeSlug;
+      const finalOrderId = orderId || parseInt(targetSlug, 10);
+
+      if (!finalSlug || !finalOrderId) {
+        return this.client.sendText(waId, '❌ Payment error. Please try starting a new session with /start.');
+      }
+
+      const payment = await this.prisma.payment.findFirst({
+        where: { orderId: finalOrderId, storeSlug: finalSlug, buyerRef: waId },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (!payment || !payment.paymentUrl) {
+        return this.client.sendText(waId, `❌ Could not find payment link for Order #${finalOrderId}. Please contact the store.`);
+      }
+
+      return this.client.sendText(waId, `💳 *Complete Payment for Order #${finalOrderId}:*\n${payment.paymentUrl}`);
+    }
+
+    const session = await this.sessionService.getSession<any>(waId, 'main');
     if (!session || !session.storeSlug) {
       return this.client.sendText(waId, 'Your session expired. Please type /start to select a store again.');
     }
     const slug = session.storeSlug;
 
+    if (action === 'confirm_order') {
+      const targetSlug = parts[1];
+      // Reuse the existing place order logic by simulating the text message
+      return this.routeMessage(waId, session?.name || 'Buyer', 'place order', 'manual_confirm');
+    }
+
+    if (action === WA_ACTION.PREV_PAGE || action === WA_ACTION.NEXT_PAGE) {
+      const page = parseInt(parts[1], 10);
+      const query = session.lastQuery || 'all';
+      return this.routeMessage(waId, session?.name || 'Buyer', query, 'manual_nav', page);
+    }
+
+    if (action === 'cancel_order') {
+      const targetSlug = parts[1];
+      await this.sessionService.deleteSession(waId, 'main');
+      return this.client.sendText(waId, '❌ Order cancelled. Type "menu" to start over.');
+    }
+
+    if (action === 'back_to_search') {
+      if (!session.lastQuery) {
+        // No prior search — fall back to category menu rather than searching "all"
+        const categories = await this.catalog.getCategories(slug);
+        return this.client.sendInteractive(waId, buildCategoryListMenu(slug, categories as any));
+      }
+      return this.routeMessage(waId, session?.name || 'Buyer', session.lastQuery, 'manual_search');
+    }
+
+    if (action === 'back_to_cat') {
+      const catId = session.lastCategory;
+      return this.routeInteractive(waId, `${WA_ACTION.CAT_SELECT}:${slug}:${catId}`);
+    }
+
+    if (action === WA_ACTION.CAT_MENU) {
+      const targetSlug = parts[1] || slug;
+      const categories = await this.catalog.getCategories(targetSlug);
+      await this.sessionService.setSession(waId, 'main', { ...session, source: 'main' });
+      return this.client.sendInteractive(waId, buildCategoryListMenu(targetSlug, categories as any));
+    }
+
+    if (action === WA_ACTION.CAT_SELECT) {
+      const targetSlug = parts[1] || slug;
+      const catId = parseInt(parts[2], 10);
+      const products = await this.catalog.getProducts(targetSlug, { categoryId: catId, limit: 10 });
+      const cartCount = (await this.cartService.get(cartUserId, targetSlug)).length;
+      
+      await this.sessionService.setSession(waId, 'main', { ...session, source: 'category', lastCategory: catId });
+      
+      const list = buildSearchResultsList(products as any, targetSlug, { 
+        query: `Category`,
+        cartCount
+      });
+      return this.client.sendInteractive(waId, list);
+    }
+
     if (action === WA_ACTION.DELIVERY_SEL) {
       const type = parts[2] as 'delivery' | 'pickup';
       await this.sessionService.setSession(waId, 'main', { ...session, deliveryType: type, step: 'payment' });
       return this.showPaymentMenu(waId, slug);
-    }
-
-    if (action === WA_ACTION.PROV_SEL) {
-      const code = parts[2];
-      await this.sessionService.setSession(waId, 'main', { ...session, provCode: code, step: 'citySelect' });
-      return this.client.sendText(waId, '🏢 Got it! Now, please type your *city or municipality* (e.g. "Makati", "Cebu City"):');
-    }
-
-    if (action === WA_ACTION.CITY_SEL) {
-      const code = parts[2];
-      await this.sessionService.setSession(waId, 'main', { ...session, cityCode: code, step: 'brgySelect' });
-      return this.client.sendText(waId, '🏘 Almost there! Please type your *barangay*:');
-    }
-
-    if (action === WA_ACTION.BRGY_SEL) {
-      const code = parts[2];
-      await this.sessionService.setSession(waId, 'main', { ...session, brgyCode: code, step: 'streetType' });
-      return this.client.sendText(waId, '🏠 Please type your *Full Street Address* (e.g. "Unit 12A, Tower 1, Avida Towers, Juan St."):');
     }
 
     if (action === WA_ACTION.LABEL_SEL) {
@@ -518,9 +587,18 @@ export class WhatsAppService implements OnModuleInit {
     }
 
     if (action === WA_ACTION.AI_CHAT) {
-      await this.sessionService.setSession(waId, 'main', { ...session, step: 'ai_chat' });
+      await this.sessionService.setSession(waId, 'main', { ...session, step: 'ai_chat', source: 'ai' });
       const retailer = await this.registry.findBySlug(slug);
-      return this.client.sendText(waId, `🤖 *AI Assistant activated for ${retailer?.name ?? 'this store'}!*\n\nI can help you find products, check stock, or answer questions. What are you looking for?\n\n_(Type "exit" to leave AI mode)_`);
+      const greeting = this.catalogFormatter.formatAiGreeting(retailer?.name ?? 'this store', 'whatsapp');
+      
+      await this.client.sendText(waId, greeting);
+      
+      const cartCount = (await this.cartService.get(cartUserId, slug)).length;
+      const shell = buildAiChatFooter(slug, retailer?.name ?? 'Store', 'whatsapp', cartCount);
+      if (shell.whatsAppButtons) {
+        await this.client.sendInteractive(waId, shell.whatsAppButtons);
+      }
+      return;
     }
 
     if (action === WA_ACTION.PROD_SELECT) {
@@ -554,11 +632,10 @@ export class WhatsAppService implements OnModuleInit {
         await this.client.sendText(waId, detailText);
       }
 
-      await this.client.sendInteractive(waId, buildProductDetailButtons(product, targetSlug));
+      const cartCount = await this.cartService.getItemQty(cartUserId, targetSlug, product.sellerId);
+      await this.client.sendInteractive(waId, buildProductDetailButtons(product as any, targetSlug, cartCount, session.source));
       return;
     }
-
-    const cartUserId = `wa:${waId}`;
 
     if (action === WA_ACTION.CART_ADD) {
       const targetSlug = parts[1];
@@ -582,8 +659,9 @@ export class WhatsAppService implements OnModuleInit {
       return;
     }
 
-    if (action === WA_ACTION.CART_VIEW) {
+    if (action === WA_ACTION.CART_VIEW || action === 'cart') {
       const targetSlug = parts[1] || slug;
+      await this.sessionService.setSession(waId, 'main', { ...session, source: 'cart' });
       if (parts[2] === 'clear') {
         await this.cartService.clear(cartUserId, targetSlug);
         await this.client.sendText(waId, '🗑 Cart cleared.');
@@ -612,7 +690,7 @@ export class WhatsAppService implements OnModuleInit {
       const targetSlug = parts[1] || slug;
       const addressId = parseInt(parts[2], 10);
       const address = await this.prisma.whatsAppAddress.findUnique({ where: { id: addressId } });
-      if (!address) return this.client.sendText(waId, 'Address error.');
+      if (!address || address.userId !== waId) return this.client.sendText(waId, 'Address error.');
 
       const retailer = await this.registry.findBySlug(targetSlug);
       const addressStr = `${address.streetLine}, ${address.barangay ? address.barangay + ', ' : ''}${address.city}, ${address.province}`;
@@ -637,24 +715,15 @@ export class WhatsAppService implements OnModuleInit {
       }
     }
 
-    if (action === WA_ACTION.CAT_MENU) {
-      const targetSlug = parts[1] || slug;
-      const retailer = await this.registry.findBySlug(targetSlug);
-      if (!retailer) return this.client.sendText(waId, 'Store not found.');
-      return this.client.sendInteractive(waId, buildStoreMainMenu(retailer.name, targetSlug));
-    }
-
     if (action === WA_ACTION.ADDR_NEW) {
       const targetSlug = parts[1] || slug;
-      await this.sessionService.setSession(waId, 'main', { storeSlug: targetSlug, step: 'collect:name' });
-      return this.client.sendText(waId, 'Sure! Let\'s setup a new delivery address.\n\nFirst, what is your *Full Name*?');
+      return this.promptNewAddress(waId, targetSlug);
     }
 
     if (action === WA_ACTION.PAY_SEL) {
       const targetSlug = parts[1] || slug;
       const method = parts[2];
-      const session = await this.sessionService.getSession<any>(waId, 'main');
-      
+      // session already read at top of routeInteractive — no second DB call needed
       const user = await this.prisma.whatsAppUser.findUnique({ where: { id: waId } });
       const fullName = `${user?.savedFirstName || 'Buyer'} ${user?.savedLastName || ''}`.trim();
 
@@ -665,9 +734,35 @@ export class WhatsAppService implements OnModuleInit {
       const summary = this.catalogFormatter.cartSummary('Review Order', items, total, 'whatsapp');
 
       const deliveryLabel = session.deliveryType === 'pickup' ? '🏪 *Store Pickup*' : '🏠 *Home Delivery*';
-      const confirmText = `${summary}\n\n👤 *Customer:* ${fullName}\n🚚 *Type:* ${deliveryLabel}\n📍 *Address:* ${session.address}\n💳 *Payment:* ${method.toUpperCase()}\n\nReply with "place order" to confirm!`;
-      return this.client.sendText(waId, confirmText);
+      const confirmText = `${summary}\n\n👤 *Customer:* ${fullName}\n🚚 *Type:* ${deliveryLabel}\n📍 *Address:* ${session.address}\n💳 *Payment:* ${method.toUpperCase()}`;
+      
+      return this.client.sendInteractive(waId, {
+        type: 'button',
+        body: { text: confirmText },
+        action: {
+          buttons: [
+            { type: 'reply', reply: { id: `confirm_order:${targetSlug}`, title: '✅ Confirm Order' } },
+            { type: 'reply', reply: { id: `cancel_order:${targetSlug}`, title: '❌ Cancel' } },
+          ]
+        }
+      });
     }
+  }
+
+  private async showStoreMainMenu(waId: string, storeSlug: string, session?: any) {
+    const retailer = await this.registry.findBySlug(storeSlug);
+    if (!retailer) return this.client.sendText(waId, 'Store not found.');
+
+    if (session?.step === 'ai_chat') {
+      const cartUserId = `wa:${waId}`;
+      const cartCount = (await this.cartService.get(cartUserId, storeSlug)).length;
+      const shell = buildAiChatFooter(storeSlug, retailer.name, 'whatsapp', cartCount);
+      if (shell.whatsAppButtons) {
+        return this.client.sendInteractive(waId, shell.whatsAppButtons);
+      }
+    }
+
+    return this.client.sendInteractive(waId, buildStoreMainMenu(retailer.name, storeSlug));
   }
 
   private async handleCheckout(waId: string, slug: string) {
@@ -683,31 +778,79 @@ export class WhatsAppService implements OnModuleInit {
       return this.client.sendText(waId, 'Let\'s get your details for the order.\n\nWhat is your *Full Name*?');
     } else {
       // Has name but no address
-      await this.sessionService.setSession(waId, 'main', { storeSlug: slug, step: 'provSelect' });
-      return this.client.sendText(waId, `Welcome back, ${user.savedFirstName}! Let's setup a delivery address.\n\nPlease type your *Province* or *Region*:`);
+      return this.promptNewAddress(waId, slug);
     }
   }
 
-  private async saveAndApplyAddress(waId: string, session: any, label: string) {
-    const prov = await this.prisma.phProvince.findUnique({ where: { code: session.provCode } });
-    const city = await this.prisma.phCity.findUnique({ where: { code: session.cityCode } });
-    const brgy = session.brgyCode ? await this.prisma.phBarangay.findUnique({ where: { code: session.brgyCode } }) : null;
+  private async promptNewAddress(waId: string, slug: string) {
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    const session = await this.sessionService.getSession<any>(waId, 'main');
 
-    if (!prov || !city) return this.client.sendText(waId, 'Error saving address.');
+    if (apiKey) {
+      const token = await this.addressPicker.createPickerToken('whatsapp', waId, slug);
+      const gatewayUrl = await this.settings.get('gateway_public_url') || 'http://localhost:3002';
+      const pickerUrl = `${gatewayUrl}/address-picker?token=${token}&channel=whatsapp`;
 
-    await this.prisma.whatsAppAddress.create({
-      data: {
-        userId: waId,
-        label,
-        streetLine: session.streetLine,
-        barangay: brgy?.name || '',
-        city: city.name,
-        province: prov.name,
-        isDefault: true
-      }
+      await this.sessionService.setSession(waId, 'main', { ...session, storeSlug: slug, step: 'freeAddress' });
+
+      return this.client.sendText(
+        waId,
+        `📍 *Enter Delivery Address*\n\nOpen this link to pick your address:\n${pickerUrl}\n\n` +
+        `_Alternatively, just type your full address here and we'll use that._`
+      );
+    }
+
+    // No API key — go straight to text prompt
+    await this.sessionService.setSession(waId, 'main', { storeSlug: slug, step: 'freeAddress' });
+    return this.client.sendText(
+      waId,
+      '📍 Please type your full delivery address:\n_(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")_'
+    );
+  }
+
+  async handlePickerCancelled(waId: string, storeSlug: string) {
+    const session = await this.sessionService.getSession<any>(waId, 'main');
+    await this.sessionService.setSession(waId, 'main', {
+      ...session,
+      storeSlug,
+      step: 'freeAddress',
     });
+    await this.client.sendText(
+      waId,
+      '📍 No problem! Please type your full delivery address:\n' +
+      '_(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")_'
+    );
+  }
 
-    const addressStr = `${session.streetLine}, ${brgy ? brgy.name + ', ' : ''}${city.name}, ${prov.name}`;
+  private async saveAndApplyAddress(waId: string, session: any, label: string) {
+    const province = session.province || '';
+    const city     = session.city     || '';
+    const barangay = session.barangay || '';
+
+    // Don't save if label is 'skip'
+    if (label && label !== 'skip') {
+      const addressCount = await this.prisma.whatsAppAddress.count({
+        where: { userId: waId }
+      });
+
+      await this.prisma.whatsAppAddress.create({
+        data: {
+          userId: waId,
+          label,
+          streetLine: session.streetLine,
+          barangay,
+          city,
+          province,
+          lat: session.lat ?? null,
+          lng: session.lng ?? null,
+          isDefault: addressCount === 0
+        }
+      });
+    }
+
+    const addressStr = session.address || 
+      [session.streetLine, barangay, city, province].filter(Boolean).join(', ');
+    
     const retailer = await this.registry.findBySlug(session.storeSlug);
 
     if (retailer?.allowsPickup) {
@@ -740,8 +883,40 @@ export class WhatsAppService implements OnModuleInit {
     return this.client.sendInteractive(waId, buildPaymentMenu(slug, methods));
   }
 
-  /** Send a standard text message (used by ConversationService/Admin) */
   async sendMessage(waId: string, text: string): Promise<void> {
     await this.client.sendText(waId, text);
   }
-}
+
+  async handlePickerAddress(waId: string, storeSlug: string, address: any) {
+    const session = await this.sessionService.getSession<any>(waId, 'main');
+    if (!session) return;
+
+    // Sanitize and cap input lengths
+    const clean = {
+      streetLine:       String(address.streetLine  || '').slice(0, 200),
+      barangay:         String(address.barangay    || '').slice(0, 100),
+      city:             String(address.city        || '').slice(0, 100),
+      province:         String(address.province    || '').slice(0, 100),
+      formattedAddress: String(address.formattedAddress || '').slice(0, 300),
+      lat:  typeof address.lat === 'number' ? address.lat : null,
+      lng:  typeof address.lng === 'number' ? address.lng : null,
+    };
+
+    // Update session with sanitized address details
+    const updatedSession = {
+      ...session,
+      streetLine: clean.streetLine,
+      barangay: clean.barangay,
+      city: clean.city,
+      province: clean.province,
+      address: clean.formattedAddress,
+      lat: clean.lat,
+      lng: clean.lng,
+      step: 'labelType', // Skip to label selection
+    };
+
+    await this.sessionService.setSession(waId, 'main', updatedSession);
+
+    await this.client.sendText(waId, `✅ Got your address:\n*${clean.formattedAddress}*`);
+    return this.client.sendInteractive(waId, buildLabelMenu(storeSlug));
+  }}

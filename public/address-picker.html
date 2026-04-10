@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Delivery Address</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=__API_KEY__&libraries=places"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .pac-container {
+      border-radius: 0.5rem;
+      margin-top: 4px;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      border: 1px solid #e5e7eb;
+    }
+    .pac-item {
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+  <div class="max-w-md mx-auto p-6">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <div class="flex items-center space-x-3 mb-6">
+        <div class="bg-blue-100 p-2 rounded-lg">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </div>
+        <h1 class="text-xl font-bold text-gray-900">Delivery Address</h1>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Search your address</label>
+          <input id="address-input" type="text" 
+            class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+            placeholder="Start typing (e.g. Rizal Street...)" autocomplete="off" />
+          <p class="mt-2 text-xs text-gray-500">We use Google Places to find your exact location.</p>
+        </div>
+
+        <div id="details-section" class="hidden space-y-4 pt-4 border-t border-gray-100">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Unit / Floor / Building (Optional)</label>
+            <input id="unit-input" type="text" 
+              class="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              placeholder="e.g. Unit 12A, Floor 3" />
+          </div>
+          
+          <div class="bg-blue-50 p-4 rounded-xl">
+            <p class="text-xs font-semibold text-blue-800 uppercase tracking-wider mb-1">Selected Address</p>
+            <p id="formatted-address" class="text-sm text-blue-900"></p>
+          </div>
+        </div>
+
+        <button id="confirm-btn" disabled
+          class="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-colors shadow-lg shadow-blue-200 disabled:shadow-none mt-6">
+          Confirm Delivery Location
+        </button>
+        
+        <button id="cancel-btn" class="w-full py-2 text-sm text-gray-400 underline mt-4">
+          Cancel — I'll type my address instead
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const token = '__TOKEN__';
+    const channel = '__CHANNEL__';
+    let selectedPlace = null;
+
+    const input = document.getElementById('address-input');
+    const unitInput = document.getElementById('unit-input');
+    const confirmBtn = document.getElementById('confirm-btn');
+    const detailsSection = document.getElementById('details-section');
+    const formattedLabel = document.getElementById('formatted-address');
+    const cancelBtn = document.getElementById('cancel-btn');
+
+    // Initialise Google Autocomplete
+    const autocomplete = new google.maps.places.Autocomplete(input, {
+      componentRestrictions: { country: 'ph' },
+      fields: ['address_components', 'geometry', 'formatted_address'],
+      types: ['address']
+    });
+
+    autocomplete.addListener('place_changed', () => {
+      const place = autocomplete.getPlace();
+      if (!place.geometry) {
+        confirmBtn.disabled = true;
+        detailsSection.classList.add('hidden');
+        return;
+      }
+
+      selectedPlace = place;
+      formattedLabel.textContent = place.formatted_address;
+      detailsSection.classList.remove('hidden');
+      confirmBtn.disabled = false;
+    });
+
+    function parsePlace(place, unit) {
+      const components = place.address_components;
+      const getComp = (type) => components.find(c => c.types.includes(type))?.long_name || '';
+
+      const streetNumber = getComp('street_number');
+      const route = getComp('route');
+      const streetLine = [unit, streetNumber, route].filter(Boolean).join(' ');
+
+      return {
+        streetLine: streetLine || getComp('premise') || getComp('sublocality_level_3'),
+        barangay: getComp('sublocality_level_1') || getComp('sublocality'),
+        city: getComp('locality'),
+        province: getComp('administrative_area_level_2'),
+        postalCode: getComp('postal_code'),
+        lat: place.geometry.location.lat(),
+        lng: place.geometry.location.lng(),
+        formattedAddress: place.formatted_address
+      };
+    }
+
+    confirmBtn.addEventListener('click', async () => {
+      if (!selectedPlace) return;
+
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Processing...';
+
+      const address = parsePlace(selectedPlace, unitInput.value);
+      const payload = { token, address };
+
+      if (channel === 'telegram') {
+        window.Telegram.WebApp.sendData(JSON.stringify(address));
+        window.Telegram.WebApp.close();
+      } else {
+        try {
+          const res = await fetch('/address-picker/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          
+          if (res.ok) {
+            document.body.innerHTML = `
+              <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center">
+                <div class="bg-green-100 p-4 rounded-full mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-gray-900 mb-2">Address Saved!</h1>
+                <p class="text-gray-600">You can now close this tab and return to WhatsApp.</p>
+              </div>
+            `;
+          } else {
+            document.body.innerHTML = `
+              <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center">
+                <div class="bg-red-100 p-4 rounded-full mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-gray-900 mb-2">Submission Failed</h1>
+                <p class="text-gray-600 mb-6">Failed to save address. Please try again.</p>
+                <button onclick="location.reload()" class="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition-colors">
+                  Try Again
+                </button>
+              </div>
+            `;
+          }
+        } catch (err) {
+          document.body.innerHTML = `
+            <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center">
+              <div class="bg-red-100 p-4 rounded-full mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+              <h1 class="text-2xl font-bold text-gray-900 mb-2">Error Occurred</h1>
+              <p class="text-gray-600 mb-6">${err.message}</p>
+              <button onclick="location.reload()" class="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition-colors">
+                Try Again
+              </button>
+            </div>
+          `;
+        }
+      }
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      if (channel === 'telegram') {
+        window.Telegram.WebApp.sendData(JSON.stringify({ cancelled: true }));
+        window.Telegram.WebApp.close();
+      } else {
+        // WhatsApp — POST cancelled flag so session can advance
+        fetch('/address-picker/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, cancelled: true })
+        }).then(() => {
+          document.body.innerHTML = `
+            <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center bg-gray-50">
+              <p class="text-gray-600 mb-6">You can now close this tab and type your address in the chat.</p>
+              <button onclick="window.close()" class="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition-colors">
+                Close Tab
+              </button>
+            </div>
+          `;
+          setTimeout(() => window.close(), 1000);
+        });
+      }
+    });
+
+    // Telegram WebApp initialisation
+    if (channel === 'telegram') {
+      window.Telegram.WebApp.expand();
+      window.Telegram.WebApp.ready();
+    }
+  </script>
+</body>
+</html>

@@ -3,6 +3,7 @@ import { CachedProduct, CachedCategory } from '@prisma/client';
 
 export const WA_ACTION = {
   STORE_SELECT: 'store_sel',
+  STORE_MENU: 'store_menu',
   CAT_MENU: 'cat_menu',
   CAT_SELECT: 'cat_sel',
   PROD_SELECT: 'prod_sel',
@@ -14,11 +15,10 @@ export const WA_ACTION = {
   ADDR_SELECT: 'addr_sel',
   ADDR_NEW: 'addr_new',
   DELIVERY_SEL: 'delivery_sel',
-  PROV_SEL: 'prov_sel',
-  CITY_SEL: 'city_sel',
-  BRGY_SEL: 'brgy_sel',
   LABEL_SEL: 'label_sel',
   PAY_SEL: 'pay_sel',
+  PREV_PAGE: 'prev_page',
+  NEXT_PAGE: 'next_page',
 };
 
 // ─── Welcome / Store Selection ──────────────────────────────────────────────
@@ -77,64 +77,118 @@ export function buildStoreMainMenu(storeName: string, storeSlug: string): Intera
   };
 }
 
+function stockBadge(stock: number): string {
+  if (stock === 0) return '❌';
+  if (stock <= 3) return '⚠️';
+  return '✅';
+}
+
 // ─── Search Results ─────────────────────────────────────────────────────────
-export function buildSearchResultsList(products: CachedProduct[], query: string, storeSlug: string): InteractiveMessage {
+export function buildSearchResultsList(
+  products: CachedProduct[], 
+  storeSlug: string,
+  options: {
+    query?: string;
+    page?: number;
+    totalPages?: number;
+    totalResults?: number;
+    cartCount?: number;
+  } = {}
+): InteractiveMessage {
+  const { query, page = 1, totalPages = 1, totalResults = products.length, cartCount = 0 } = options;
+
   if (products.length === 0) {
     return {
       type: 'button',
-      body: { text: `No products found for "${query}"` },
+      body: { text: query ? `No products found for "${query.substring(0, 80)}"`.substring(0, 1024) : 'No products found.' },
       action: {
         buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.CAT_MENU}:${storeSlug || 'all'}`, title: 'View Categories' } }]
       }
     };
   }
 
+  const rows = products.map((p) => ({
+    id: `${WA_ACTION.PROD_SELECT}:${p.storeSlug || storeSlug}:${p.sellerId}`,
+    title: p.title.substring(0, 24),
+    description: `₱${p.price || 0} · ${stockBadge(p.stockQuantity || 0)}`.substring(0, 72)
+  }));
+
+  // Navigation rows
+  const navRows: any[] = [];
+  if (page > 1) {
+    navRows.push({ id: `${WA_ACTION.PREV_PAGE}:${page - 1}`, title: '◀ Previous Page', description: `Back to page ${page - 1}` });
+  }
+  if (page < totalPages) {
+    navRows.push({ id: `${WA_ACTION.NEXT_PAGE}:${page + 1}`, title: 'Next Page ▶', description: `More results on page ${page + 1}` });
+  }
+  if (cartCount > 0) {
+    navRows.push({ id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: `🛒 View Cart (${cartCount})`, description: 'Proceed to checkout' });
+  }
+
+  const sections = [
+    {
+      title: 'Products',
+      rows
+    }
+  ];
+
+  if (navRows.length > 0) {
+    sections.push({
+      title: 'Navigation',
+      rows: navRows
+    });
+  }
+
   return {
     type: 'list',
-    header: { type: 'text', text: `Search Results` },
-    body: { text: `Found ${products.length} items for "${query}"` },
+    header: { type: 'text', text: `🔎 Results · Page ${page} of ${totalPages}`.substring(0, 60) },
+    body: { text: query ? `Found ${totalResults} products matching "${query.substring(0, 80)}".` : `Found ${totalResults} products.` },
     action: {
-      button: 'View Products',
-      sections: [
-        {
-          title: 'Top Results',
-          rows: products.slice(0, 10).map((p: any) => ({
-            id: `${WA_ACTION.PROD_SELECT}:${p.storeSlug || storeSlug}:${p.sellerId}`,
-            title: p.title.substring(0, 24),
-            description: `₱${p.price || 0}`
-          }))
-        }
-      ]
+      button: 'View Options',
+      sections
     }
   };
 }
 
 // ─── Search Result Buttons ──────────────────────────────────────────────────
-export function buildSearchResultButtons(product: CachedProduct, storeSlug: string): InteractiveMessage {
+export function buildSearchResultButtons(product: CachedProduct, storeSlug: string, cartCount: number = 0): InteractiveMessage {
+  const addLabel = cartCount > 0 ? `🛒 Add More (${cartCount})` : '🛒 Add to Cart';
+  
   return {
     type: 'button',
     body: { text: `Options for ${product.title}:` },
     action: {
       buttons: [
         { type: 'reply', reply: { id: `${WA_ACTION.PROD_SELECT}:${storeSlug}:${product.sellerId}`, title: '📋 View Details' } },
-        { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: '🛒 Add to Cart' } }
+        { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: addLabel.substring(0, 20) } }
       ]
     }
   };
 }
 
 // ─── Product Details Buttons ────────────────────────────────────────────────
-export function buildProductDetailButtons(product: CachedProduct, storeSlug: string): InteractiveMessage {
+export function buildProductDetailButtons(product: CachedProduct, storeSlug: string, cartCount: number = 0, source?: string): InteractiveMessage {
+  const addLabel = cartCount > 0 ? `🛒 Add More (${cartCount})` : '🛒 Add to Cart';
+  
+  const buttons = [
+    { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: addLabel.substring(0, 20) } },
+    { type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: '🛒 View Cart' } },
+  ];
+
+  if (source === 'search') {
+    buttons.push({ type: 'reply', reply: { id: `back_to_search:${storeSlug}`, title: '⬅️ Back to Results' } });
+  } else if (source === 'category') {
+    buttons.push({ type: 'reply', reply: { id: `back_to_cat:${storeSlug}`, title: '⬅️ Back to Category' } });
+  } else if (source === 'ai') {
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.AI_CHAT}:${storeSlug}`, title: '🤖 Back to AI' } });
+  } else {
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏪 Store Menu' } });
+  }
+  
   return {
     type: 'button',
     body: { text: `Add ${product.title} to your cart?` },
-    action: {
-      buttons: [
-        { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: '🛒 Add to Cart' } },
-        { type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: '🛒 View Cart' } },
-        { type: 'reply', reply: { id: `${WA_ACTION.CAT_MENU}:${storeSlug}`, title: '🏪 Store Menu' } }
-      ]
-    }
+    action: { buttons: buttons as any }
   };
 }
 
@@ -154,28 +208,28 @@ export function buildDeliveryMenu(storeSlug: string, allowsPickup: boolean): Int
   };
 }
 
-// ─── Location Selection (Province/City/Barangay) ───────────────────────────
-export function buildLocationListMenu(
-  storeSlug: string, 
-  type: 'province' | 'city' | 'barangay', 
-  items: { code: string, name: string }[]
-): InteractiveMessage {
-  const titleMap = { province: 'Province', city: 'City/Mun.', barangay: 'Barangay' };
-  const actionMap = { province: WA_ACTION.PROV_SEL, city: WA_ACTION.CITY_SEL, barangay: WA_ACTION.BRGY_SEL };
+// ─── Delivery Type Selection ────────────────────────────────────────────────
 
+export function buildCategoryListMenu(storeSlug: string, categories: CachedCategory[]): InteractiveMessage {
   return {
     type: 'list',
-    header: { type: 'text', text: `Select ${titleMap[type]}` },
-    body: { text: `Please choose your ${type} from the list below.` },
+    header: { type: 'text', text: 'Browse Categories' },
+    body: { text: 'Select a category to see its products.' },
     action: {
-      button: `Select ${titleMap[type]}`,
+      button: 'View Categories',
       sections: [
         {
-          title: titleMap[type],
-          rows: items.slice(0, 10).map(item => ({
-            id: `${actionMap[type]}:${storeSlug}:${item.code}`,
-            title: item.name.substring(0, 24)
+          title: 'Categories',
+          rows: categories.map(c => ({
+            id: `${WA_ACTION.CAT_SELECT}:${storeSlug}:${c.sellerId}`,
+            title: c.name.substring(0, 24)
           }))
+        },
+        {
+          title: 'Options',
+          rows: [
+            { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏪 Store Menu', description: 'Go back to main menu' }
+          ]
         }
       ]
     }
@@ -187,7 +241,7 @@ export function buildLabelMenu(storeSlug: string): InteractiveMessage {
   return {
     type: 'list',
     header: { type: 'text', text: 'Save Address' },
-    body: { text: 'How would you like to label this address?' },
+    body: { text: 'How would you like to label this address? Choose a label below, or type your own custom label (e.g. "Condo").' },
     action: {
       button: 'Choose Label',
       sections: [
@@ -197,6 +251,7 @@ export function buildLabelMenu(storeSlug: string): InteractiveMessage {
             { id: `${WA_ACTION.LABEL_SEL}:${storeSlug}:Home`, title: 'Home' },
             { id: `${WA_ACTION.LABEL_SEL}:${storeSlug}:Work`, title: 'Work' },
             { id: `${WA_ACTION.LABEL_SEL}:${storeSlug}:Other`, title: 'Other' },
+            { id: `${WA_ACTION.LABEL_SEL}:${storeSlug}:skip`, title: '❌ Don\'t save' },
           ]
         }
       ]
@@ -211,7 +266,7 @@ export function buildCartMenu(storeSlug: string, itemCount: number): Interactive
       type: 'button',
       body: { text: `Your cart is empty.` },
       action: {
-        buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.CAT_MENU}:${storeSlug}`, title: 'Browse Products' } }]
+        buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: 'Browse Products' } }]
       }
     };
   }
@@ -220,9 +275,9 @@ export function buildCartMenu(storeSlug: string, itemCount: number): Interactive
     type: 'button',
     body: { text: `You have ${itemCount} types of items in your cart. What's next?` },
     action: {
-      buttons: [
+        buttons: [
         { type: 'reply', reply: { id: `${WA_ACTION.CHECKOUT}:${storeSlug}`, title: 'Checkout 💳' } },
-        { type: 'reply', reply: { id: `${WA_ACTION.CAT_MENU}:${storeSlug}`, title: 'Keep Shopping' } },
+        { type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: 'Keep Shopping' } },
         { type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}:clear`, title: 'Clear Cart ❌' } }
       ]
     }
@@ -242,7 +297,7 @@ export function buildAddressSelectMenu(storeSlug: string, addresses: any[]): Int
           title: 'Saved Addresses',
           rows: addresses.map(a => ({
             id: `${WA_ACTION.ADDR_SELECT}:${storeSlug}:${a.id}`,
-            title: `${a.streetLine.substring(0, 20)}...`,
+            title: a.streetLine.length > 20 ? `${a.streetLine.substring(0, 19)}…` : a.streetLine,
             description: `${a.city}, ${a.province}`.substring(0, 72)
           }))
         },

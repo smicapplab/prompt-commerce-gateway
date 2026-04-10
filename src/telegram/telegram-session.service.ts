@@ -3,18 +3,18 @@ import { PRISMA } from '../prisma/prisma.module';
 import type { PrismaClient } from '@prisma/client';
 
 @Injectable()
-export class WhatsAppSessionService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(WhatsAppSessionService.name);
-  private readonly TTL_MINUTES = 30;
+export class TelegramSessionService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(TelegramSessionService.name);
+  private readonly TTL_MINUTES = 60 * 24; // Telegram sessions last 24h by default
   private cleanupTimer?: NodeJS.Timeout;
 
   constructor(@Inject(PRISMA) private readonly prisma: PrismaClient) {}
 
   onModuleInit() {
-    // Run cleanup every 15 minutes
+    // Run cleanup every hour
     this.cleanupTimer = setInterval(() => {
       this.cleanupExpired().catch(err => this.logger.error('Session cleanup failed', err));
-    }, 15 * 60 * 1000);
+    }, 60 * 60 * 1000);
   }
 
   onModuleDestroy() {
@@ -23,7 +23,7 @@ export class WhatsAppSessionService implements OnModuleInit, OnModuleDestroy {
 
   /** Get active session, auto-deleted if expired */
   async getSession<T = any>(userId: string, type: string): Promise<T | null> {
-    const session = await this.prisma.whatsAppSession.findUnique({
+    const session = await this.prisma.telegramSession.findUnique({
       where: { userId_type: { userId, type } },
     });
 
@@ -43,12 +43,12 @@ export class WhatsAppSessionService implements OnModuleInit, OnModuleDestroy {
     return session.data as unknown as T;
   }
 
-  /** Upsert session with new 30-min expiry */
-  async setSession<T = any>(userId: string, type: string, data: T): Promise<void> {
+  /** Upsert session with new expiry */
+  async setSession<T = any>(userId: string, type: string, data: T, ttlMinutes?: number): Promise<void> {
     const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + this.TTL_MINUTES);
+    expiresAt.setMinutes(expiresAt.getMinutes() + (ttlMinutes || this.TTL_MINUTES));
 
-    await this.prisma.whatsAppSession.upsert({
+    await this.prisma.telegramSession.upsert({
       where: { userId_type: { userId, type } },
       create: { userId, type, data: data as any, expiresAt },
       update: { data: data as any, expiresAt, updatedAt: new Date() },
@@ -57,7 +57,7 @@ export class WhatsAppSessionService implements OnModuleInit, OnModuleDestroy {
 
   async deleteSession(userId: string, type: string): Promise<void> {
     try {
-      await this.prisma.whatsAppSession.delete({
+      await this.prisma.telegramSession.delete({
         where: { userId_type: { userId, type } },
       });
     } catch {
@@ -66,18 +66,18 @@ export class WhatsAppSessionService implements OnModuleInit, OnModuleDestroy {
   }
 
   async clearAllSessions(userId: string): Promise<void> {
-    await this.prisma.whatsAppSession.deleteMany({
+    await this.prisma.telegramSession.deleteMany({
       where: { userId },
     });
   }
 
-  /** Optional: Clean up expired sessions periodically */
+  /** Clean up expired sessions periodically */
   async cleanupExpired(): Promise<void> {
-    const result = await this.prisma.whatsAppSession.deleteMany({
+    const result = await this.prisma.telegramSession.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
     if (result.count > 0) {
-      this.logger.debug(`Cleaned up ${result.count} expired WhatsApp sessions`);
+      this.logger.debug(`Cleaned up ${result.count} expired Telegram sessions`);
     }
   }
 }

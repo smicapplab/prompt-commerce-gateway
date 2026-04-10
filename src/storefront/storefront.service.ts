@@ -92,7 +92,7 @@ export class StorefrontService {
     }
 
     return {
-      products: products.map(p => this._formatImages(p, baseUrl)),
+      products: (products as any[]).map(p => this._formatImages(p, baseUrl)),
       pagination: {
         total,
         page,
