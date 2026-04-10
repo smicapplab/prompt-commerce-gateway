@@ -19,6 +19,7 @@ export const WA_ACTION = {
   PAY_SEL: 'pay_sel',
   PREV_PAGE: 'prev_page',
   NEXT_PAGE: 'next_page',
+  QTY_SEL: 'qty_sel',
 };
 
 // ─── Welcome / Store Selection ──────────────────────────────────────────────
@@ -163,6 +164,82 @@ export function buildSearchResultButtons(product: CachedProduct, storeSlug: stri
         { type: 'reply', reply: { id: `${WA_ACTION.CART_ADD}:${storeSlug}:${product.sellerId}:1`, title: addLabel.substring(0, 20) } }
       ]
     }
+  };
+}
+
+// ─── Product Card (search result card — image header + body + action buttons) ─
+// Mirrors Telegram's photo card UX. imageUrl is optional; omitting it produces
+// a text-only card which still renders richer than a plain list row.
+export function buildProductCard(
+  product: CachedProduct,
+  storeSlug: string,
+  cartCount: number = 0,
+  options: { pageInfo?: string; imageUrl?: string } = {},
+): InteractiveMessage {
+  const { pageInfo, imageUrl } = options;
+
+  const priceStr  = `₱${(product.price || 0).toLocaleString('en-PH')}`;
+  const stock     = product.stockQuantity ?? 0;
+  const stockText = stock === 0 ? '❌ Out of stock' : stock <= 3 ? `⚠️ Only ${stock} left` : '✅ In stock';
+  const snippet   = product.description
+    ? '\n' + product.description.replace(/[\n\r]+/g, ' ').trim()
+    : '';
+
+  const bodyText = `*${product.title}*\n${priceStr} · ${stockText}${snippet}`;
+
+  const addLabel = cartCount > 0 ? `🛒 Add More (${cartCount})` : '🛒 Add to Cart';
+
+  const msg: InteractiveMessage = {
+    type: 'button',
+    body: { text: bodyText.substring(0, 1024) },
+    action: {
+      buttons: [
+        { type: 'reply', reply: { id: `${WA_ACTION.QTY_SEL}:${storeSlug}:${product.sellerId}`, title: addLabel.substring(0, 20) } },
+        { type: 'reply', reply: { id: `${WA_ACTION.PROD_SELECT}:${storeSlug}:${product.sellerId}`, title: '📋 Full Details' } },
+      ],
+    },
+  };
+
+  if (imageUrl) {
+    msg.header = { type: 'image', image: { link: imageUrl } };
+  }
+
+  if (pageInfo) {
+    msg.footer = { text: pageInfo.substring(0, 60) };
+  }
+
+  return msg;
+}
+
+// ─── Search Navigation Footer ────────────────────────────────────────────────
+// Shown after all product cards to let users paginate or jump to cart.
+// Returns null when there is only one page and the cart is empty (no nav needed).
+export function buildSearchNavigation(
+  storeSlug: string,
+  page: number,
+  totalPages: number,
+  cartCount: number = 0,
+): InteractiveMessage | null {
+  const buttons: any[] = [];
+
+  if (page > 1) {
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.PREV_PAGE}:${page - 1}`, title: '◀ Previous Page' } });
+  }
+  if (page < totalPages) {
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.NEXT_PAGE}:${page + 1}`, title: 'Next Page ▶' } });
+  }
+  if (cartCount > 0) {
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: `🛒 Cart (${cartCount})` } });
+  } else if (buttons.length < 3) {
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏪 Store Menu' } });
+  }
+
+  if (buttons.length === 0) return null;
+
+  return {
+    type: 'button',
+    body: { text: `Page ${page} of ${totalPages} — choose an action:` },
+    action: { buttons: buttons.slice(0, 3) as any },
   };
 }
 

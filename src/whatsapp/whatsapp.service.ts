@@ -17,7 +17,6 @@ import { buildAiChatFooter } from '../shared/ai-chat-shell';
 import {
   buildStoreListMenu,
   buildStoreMainMenu,
-  buildSearchResultsList,
   buildSearchResultButtons,
   buildProductDetailButtons,
   buildDeliveryMenu,
@@ -26,6 +25,8 @@ import {
   buildCategoryListMenu,
   buildAddressSelectMenu,
   buildPaymentMenu,
+  buildProductCard,
+  buildSearchNavigation,
   WA_ACTION
 } from './whatsapp-menu.builder';
 
@@ -153,6 +154,35 @@ export class WhatsAppService implements OnModuleInit {
       return `${base}/uploads/${imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl}`;
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * Sends product search results as individual WhatsApp card messages (image + title + price +
+   * buttons), matching the Telegram card UX.  Follows up with a navigation/pagination footer.
+   */
+  private async sendSearchCards(
+    waId: string,
+    products: any[],
+    storeSlug: string,
+    opts: { query?: string; page?: number; totalPages?: number; totalResults?: number; cartCount?: number } = {},
+  ): Promise<void> {
+    const { page = 1, totalPages = 1, cartCount = 0 } = opts;
+
+    const cartUserId = `wa:${waId}`;
+    for (const product of products) {
+      const imageUrl = await this.resolveImageUrl(product, storeSlug);
+      const itemQty  = await this.cartService.getItemQty(cartUserId, storeSlug, product.sellerId ?? product.id).catch(() => 0);
+      const card = buildProductCard(product, storeSlug, itemQty, {
+        imageUrl,
+        pageInfo: products.length > 1 ? `Result ${products.indexOf(product) + 1} of ${opts.totalResults ?? products.length}` : undefined,
+      });
+      await this.client.sendInteractive(waId, card);
+    }
+
+    const nav = buildSearchNavigation(storeSlug, page, totalPages, cartCount);
+    if (nav) {
+      await this.client.sendInteractive(waId, nav);
     }
   }
 
@@ -402,13 +432,13 @@ export class WhatsAppService implements OnModuleInit {
 
         const cartCount = (await this.cartService.get(cartUserId, session.storeSlug)).length;
 
-        // 2. If AI returned products, show as interactive list (Gap 3a)
+        // 2. If AI returned products, show as cards (matching Telegram UX)
         if (result.products && result.products.length > 0) {
-          const list = buildSearchResultsList(result.products as any, session.storeSlug, {
+          await this.sendSearchCards(waId, result.products as any[], session.storeSlug, {
             query: text,
-            cartCount
+            cartCount,
+            totalResults: result.products.length,
           });
-          await this.client.sendInteractive(waId, list);
         }
 
         // 3. Always show AI chat footer/navigation (Issue 4c)
@@ -447,21 +477,21 @@ export class WhatsAppService implements OnModuleInit {
       }
     }
 
-    // New approach: Send ONE interactive list instead of multiple cards (Issue 1c)
+    const totalPages = Math.ceil(total / PAGE_SIZE);
     const cartCount = session?.storeSlug ? (await this.cartService.get(cartUserId, session.storeSlug)).length : 0;
-    const list = buildSearchResultsList(storeResults as any, session?.storeSlug || 'all', { 
-      query: text,
-      page,
-      totalPages: Math.ceil(total / PAGE_SIZE),
-      totalResults: total,
-      cartCount
-    });
 
     if (session) {
       await this.sessionService.setSession(waId, 'main', { ...session, source: 'search', lastQuery: text });
     }
 
-    return this.client.sendInteractive(waId, list);
+    // Send results as individual product cards (matching Telegram UX)
+    await this.sendSearchCards(waId, storeResults as any[], session?.storeSlug || 'all', {
+      query: text,
+      page,
+      totalPages,
+      totalResults: total,
+      cartCount,
+    });
   }
 
   private async routeInteractive(waId: string, payload: string): Promise<any> {
@@ -567,12 +597,11 @@ export class WhatsAppService implements OnModuleInit {
       const cartCount = (await this.cartService.get(cartUserId, targetSlug)).length;
       
       await this.sessionService.setSession(waId, 'main', { ...session, source: 'category', lastCategory: catId });
-      
-      const list = buildSearchResultsList(products as any, targetSlug, { 
-        query: `Category`,
-        cartCount
+
+      await this.sendSearchCards(waId, products as any[], targetSlug, {
+        cartCount,
+        totalResults: products.length,
       });
-      return this.client.sendInteractive(waId, list);
     }
 
     if (action === WA_ACTION.DELIVERY_SEL) {
