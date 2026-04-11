@@ -203,8 +203,20 @@ export class PaymentService {
     if (!retailer) return null;
 
     const adapter = await this.resolveAdapter(this.getPrimaryProvider(retailer));
-    // Use the stored secret, or fall back to 'mock-secret' if it's the mock provider
-    const secret = retailer.paymentWebhookSecret || (adapter.name === 'mock' ? 'mock-secret' : '');
+    
+    // SEC-1: Reject webhooks if secret is missing for real providers (Stripe, PayMongo).
+    // Attacker could forge a valid HMAC signature using an empty key if we silently fall back to ''.
+    let secret = retailer.paymentWebhookSecret;
+    if (!secret) {
+      if (adapter.name === 'mock') {
+        secret = 'mock-secret';
+      } else if (adapter.name === 'stripe' || adapter.name === 'paymongo') {
+        this.logger.error(`[SEC-1] Webhook rejected for ${storeSlug}: No secret configured for ${adapter.name}`);
+        return null;
+      } else {
+        secret = '';
+      }
+    }
 
     const event = await adapter.handleWebhook(body, signature, secret);
     if (!event) return null;
