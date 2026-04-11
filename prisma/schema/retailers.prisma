@@ -51,6 +51,12 @@ model Retailer {
   // If set and non-empty, takes precedence over paymentProvider+allowCod for Telegram checkout.
   paymentMethods       String  @default("[]") @map("payment_methods")
 
+  // ── Per-store Google Cloud config ─────────────────────────────────────────
+  // googlePlacesBrowserKey: For the buyer-facing address picker (HTTP Referrer restricted)
+  // googleMapsEmbedKey:   For the seller-facing order maps (HTTP Referrer restricted)
+  googlePlacesBrowserKey String? @map("google_places_browser_key")
+  googleMapsEmbedKey     String? @map("google_maps_embed_key")
+
   platformKey   PlatformKey?
   auditLogs     AuditLog[]
   conversations Conversation[]

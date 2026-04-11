@@ -5,9 +5,16 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { RegistryModule } from '../registry/registry.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => WhatsAppModule), forwardRef(() => TelegramModule), SettingsModule],
+  imports: [
+    PrismaModule,
+    forwardRef(() => WhatsAppModule),
+    forwardRef(() => TelegramModule),
+    SettingsModule,
+    RegistryModule,
+  ],
   providers: [AddressPickerService],
   controllers: [AddressPickerController],
   exports: [AddressPickerService],

@@ -6,6 +6,7 @@ import { TelegramService } from '../telegram/telegram.service';
 import { SettingsService } from '../settings/settings.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import { RegistryService } from '../registry/registry.service';
 
 @Controller('address-picker')
 export class AddressPickerController implements OnModuleInit {
@@ -19,6 +20,7 @@ export class AddressPickerController implements OnModuleInit {
     @Inject(forwardRef(() => TelegramService))
     private readonly telegram: TelegramService,
     private readonly settings: SettingsService,
+    private readonly registry: RegistryService,
   ) { }
 
   async onModuleInit() {
@@ -47,7 +49,12 @@ export class AddressPickerController implements OnModuleInit {
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).send('Configuration error: template missing');
     }
 
-    const apiKey = process.env.GOOGLE_PLACES_API_KEY || await this.settings.get('google_places_api_key');
+    const retailer = await this.registry.findBySlug(session.storeSlug).catch(() => null);
+    const apiKey = retailer?.googlePlacesBrowserKey ||
+      process.env.GOOGLE_PLACES_BROWSER_KEY ||
+      process.env.GOOGLE_PLACES_API_KEY ||
+      await this.settings.get('google_places_browser_key') ||
+      await this.settings.get('google_places_api_key');
 
     // Inject data into cached template
     const html = this.htmlTemplate

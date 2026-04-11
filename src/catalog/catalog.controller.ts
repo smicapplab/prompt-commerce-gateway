@@ -232,6 +232,47 @@ export class CatalogController {
     };
   }
 
+  // ── PATCH /api/stores/:slug/google-config ─────────────────────────────
+  /**
+   * Pushed by the seller when the store owner updates their Google Cloud settings.
+   * Updates googlePlacesBrowserKey and googleMapsEmbedKey.
+   *
+   * Auth: x-gateway-key header
+   * Body: { googlePlacesBrowserKey, googleMapsEmbedKey }
+   */
+  @Patch(':slug/google-config')
+  async setGoogleConfig(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+    @Body() body: {
+      googlePlacesBrowserKey?: string | null;
+      googleMapsEmbedKey?:     string | null;
+    },
+  ) {
+    const retailer = await this.validateKey(slug, platformKey);
+
+    await this.registry.update(retailer.id, {
+      googlePlacesBrowserKey: body.googlePlacesBrowserKey !== undefined ? body.googlePlacesBrowserKey : retailer.googlePlacesBrowserKey,
+      googleMapsEmbedKey:     body.googleMapsEmbedKey     !== undefined ? body.googleMapsEmbedKey     : retailer.googleMapsEmbedKey,
+    });
+
+    return { message: `Google config updated for "${slug}".` };
+  }
+
+  // ── GET /api/stores/:slug/google-config/status ────────────────────────
+  /** Returns whether Google API keys are configured. Auth: x-gateway-key */
+  @Get(':slug/google-config/status')
+  async getGoogleConfigStatus(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+  ) {
+    const retailer = await this.validateKey(slug, platformKey);
+    return {
+      hasPlacesKey: !!retailer.googlePlacesBrowserKey,
+      hasMapsKey:   !!retailer.googleMapsEmbedKey,
+    };
+  }
+
   // ── GET /api/stores/:slug/sync/status ─────────────────────────────────
   /**
    * Returns whether the store has been synced and when.

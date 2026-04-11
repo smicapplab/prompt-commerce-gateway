@@ -25,25 +25,27 @@ export interface UpdateRetailerDto {
   verified?: boolean;
   active?: boolean;
   // AI assistant config for the Telegram bot
-  aiProvider?:     string | null;
-  aiApiKey?:       string | null;
-  aiModel?:        string | null;
+  aiProvider?: string | null;
+  aiApiKey?: string | null;
+  aiModel?: string | null;
   aiSystemPrompt?: string | null;
-  serperApiKey?:   string | null;
+  serperApiKey?: string | null;
   // Telegram and WhatsApp seller notifications
   telegramNotifyChatId?: string | null;
   whatsappNotifyNumber?: string | null;
   // Payment gateway config
-  paymentProvider?:      string | null;
-  paymentApiKey?:        string | null;
-  paymentPublicKey?:     string | null;
+  paymentProvider?: string | null;
+  paymentApiKey?: string | null;
+  paymentPublicKey?: string | null;
   paymentWebhookSecret?: string | null;
-  paymentInstructions?:  string | null;
-  paymentLinkTemplate?:  string | null;
-  assistedLabel?:        string | null;
-  allowsPickup?:         boolean;
-  allowCod?:             boolean;
-  paymentMethods?:       string;
+  paymentInstructions?: string | null;
+  paymentLinkTemplate?: string | null;
+  assistedLabel?: string | null;
+  allowsPickup?: boolean;
+  allowCod?: boolean;
+  paymentMethods?: string;
+  googleMapsEmbedKey?: string | null;
+  googlePlacesBrowserKey?: string | null;
 }
 
 @Injectable()
@@ -52,7 +54,7 @@ export class RegistryService {
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     private readonly keysService: KeysService,
     private readonly mailService: MailService,
-  ) {}
+  ) { }
 
   async findAll() {
     return this.prisma.retailer.findMany({
