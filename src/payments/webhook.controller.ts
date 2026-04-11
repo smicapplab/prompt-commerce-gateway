@@ -49,7 +49,10 @@ export class WebhookController {
     private readonly telegramService: TelegramService,
     private readonly settings: SettingsService,
     private readonly keys: KeysService,
-  ) {}
+  ) {
+    // PERF-3: Prune stale rate-limit rows in the background
+    this.startRateLimitPruner();
+  }
 
   // ── Bot config (pushed by seller when Telegram settings are saved) ────────
 
@@ -108,12 +111,10 @@ export class WebhookController {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        // Prune expired entries to keep the table size under control
-        await tx.rateLimit.deleteMany({ where: { resetAt: { lt: now } } });
-
         const record = await tx.rateLimit.findUnique({ where: { key } });
 
         if (!record || now > record.resetAt) {
+          // New window — upsert with count = 1
           await tx.rateLimit.upsert({
             where: { key },
             create: { key, count: 1, resetAt: new Date(now.getTime() + windowMs) },
@@ -122,18 +123,34 @@ export class WebhookController {
           return false;
         }
 
-        const newCount = record.count + 1;
-        await tx.rateLimit.update({
-          where: { key },
-          data: { count: newCount },
-        });
+        // BUG-6: Use atomic SQL increment to prevent lost-update under concurrency
+        await tx.$executeRaw`
+          UPDATE rate_limits SET count = count + 1 WHERE key = ${key}
+        `;
 
-        return newCount > limit;
+        // Re-read to get the authoritative post-increment count
+        const updated = await tx.rateLimit.findUnique({ where: { key } });
+        return (updated?.count ?? 0) > limit;
       });
     } catch (err) {
       this.logger.error(`Rate limit check failed for ${ip}: ${err}`);
       return false; // Fail open to avoid blocking valid webhooks
     }
+  }
+
+  // Prune stale rate-limit rows in the background (runs every 5 minutes).
+  // This replaces the per-request DELETE that ran on every webhook call.
+  private startRateLimitPruner(): void {
+    setInterval(async () => {
+      try {
+        const { count } = await this.prisma.rateLimit.deleteMany({
+          where: { resetAt: { lt: new Date() } },
+        });
+        if (count > 0) this.logger.debug(`Pruned ${count} expired rate-limit entries.`);
+      } catch (err) {
+        this.logger.error(`Rate-limit pruner failed: ${err}`);
+      }
+    }, 5 * 60 * 1000).unref();
   }
 
   // ── Telegram webhook ───────────────────────────────────────────────────────

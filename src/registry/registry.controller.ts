@@ -36,7 +36,7 @@ class UpdateStoreConfigDto {
 
 @Controller('api/register')
 export class RegistrationController {
-  constructor(private readonly registry: RegistryService) {}
+  constructor(private readonly registry: RegistryService) { }
 
   /**
    * POST /api/register
@@ -54,6 +54,19 @@ export class RegistrationController {
         },
       }),
       limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+      fileFilter: (_req, file, cb) => {
+        const ALLOWED_MIME = new Set([
+          'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+          'application/pdf',
+        ]);
+        if (ALLOWED_MIME.has(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(new BadRequestException(
+            `Invalid file type "${file.mimetype}". Only JPEG, PNG, WebP, GIF, or PDF are accepted.`
+          ), false);
+        }
+      },
     }),
   )
   async register(
@@ -80,7 +93,7 @@ export class StoresController {
   constructor(
     private readonly keysService: KeysService,
     private readonly registry: RegistryService,
-  ) {}
+  ) { }
 
   /**
    * PATCH /api/stores/:slug/store-config
@@ -94,7 +107,7 @@ export class StoresController {
     @Headers('x-gateway-key') platformKey: string,
   ) {
     if (!platformKey) throw new UnauthorizedException('x-gateway-key header required.');
-    
+
     const retailer = await this.keysService.validateKey(platformKey);
     if (!retailer || retailer.slug !== slug) {
       throw new UnauthorizedException('Invalid platform key for this store.');
@@ -141,7 +154,7 @@ export class StoresController {
 export class RetailersController {
   constructor(
     private readonly registry: RegistryService,
-  ) {}
+  ) { }
 
   /** GET /api/retailers */
   @Get()

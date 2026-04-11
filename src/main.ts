@@ -5,9 +5,11 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import path from 'path';
 import fs from 'fs';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { AuthService } from './auth/auth.service';
 import { RegistryService } from './registry/registry.service';
+import { KeysService } from './keys/keys.service';
 import express from 'express';
 import { mountGatewayMcp } from './mcp/gateway-server';
 import { ensureEnvSetup } from './auth/env-setup';
@@ -23,6 +25,9 @@ async function bootstrap(): Promise<void> {
 
   // Enable 'trust proxy' so that req.ip is correct when behind a reverse proxy (e.g. Nginx, Cloudflare, Render)
   app.set('trust proxy', true);
+
+  // SEC-A: Cookie parser must be registered before NestJS guards run
+  app.use(cookieParser());
 
   // Apply global validation pipe
   app.useGlobalPipes(new ValidationPipe({
@@ -105,7 +110,8 @@ async function bootstrap(): Promise<void> {
   // ── Mount MCP gateway on the same Express instance ─────────────────────────
   // The MCP SSE endpoint lives at /sse (alongside NestJS API routes at /api/*)
   const registryService = app.get(RegistryService);
-  mountGatewayMcp(expressApp, registryService);
+  const keysService = app.get(KeysService);
+  mountGatewayMcp(expressApp, registryService, keysService);
 
   // ── Start ──────────────────────────────────────────────────────────────────
   // Render injects PORT at runtime; fall back to GATEWAY_PORT for local dev

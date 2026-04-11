@@ -4,6 +4,7 @@ import { PRISMA } from '../prisma/prisma.module';
 import { RegistryService } from '../registry/registry.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { safeFetch } from '../utils/ssrf';
 
 export type SenderType = 'buyer' | 'ai' | 'human' | 'system';
 
@@ -195,15 +196,18 @@ export class ConversationService {
 
   /** Internal helper to call seller app with gateway platform key */
   private async mirrorToSeller(slug: string, method: string, path: string, body: any, retries = 2) {
+    // SEC-C: Fetch retailer once before the retry loop to avoid redundant DB calls.
+    const retailer = await this.registry.findBySlug(slug);
+    if (!retailer.platformKey) {
+      throw new Error(`No platform key for retailer ${slug}`);
+    }
+
+    const url = `${retailer.mcpServerUrl}${path}?store=${slug}`;
+
     for (let i = 0; i <= retries; i++) {
       try {
-        const retailer = await this.registry.findBySlug(slug);
-        if (!retailer.platformKey) {
-          throw new Error(`No platform key for retailer ${slug}`);
-        }
-
-        const url = `${retailer.mcpServerUrl}${path}?store=${slug}`;
-        const res = await fetch(url, {
+        // SEC-C: Use safeFetch to pin the resolved IP and prevent DNS rebinding SSRF
+        const res = await safeFetch(url, {
           method,
           headers: {
             'Content-Type': 'application/json',
@@ -222,8 +226,9 @@ export class ConversationService {
         if (i === retries) {
           throw err;
         }
-        // Wait before retry
-        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        // Exponential backoff with jitter
+        const delay = Math.min(1000 * 2 ** i + Math.random() * 200, 8000);
+        await new Promise(r => setTimeout(r, delay));
       }
     }
   }

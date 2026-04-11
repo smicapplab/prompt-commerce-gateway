@@ -17,8 +17,8 @@ interface PoolEntry {
 const connectionPool = new Map<string, PoolEntry>();
 const IDLE_TIMEOUT = 30000;
 
-async function getResourceKey(retailer: RetailerTarget): Promise<string> {
-  // Use a predictable key based on URL and key
+// BUG-2: This is a pure synchronous string concatenation — no need for async.
+function getResourceKey(retailer: RetailerTarget): string {
   return `${retailer.mcpServerUrl}|${retailer.platformKey}`;
 }
 
@@ -31,7 +31,7 @@ export async function callRetailerTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const key = await getResourceKey(retailer);
+  const key = getResourceKey(retailer);
   let entry = connectionPool.get(key);
 
   if (entry?.timer) {
@@ -65,13 +65,13 @@ export async function callRetailerTool(
       entry = { client, transport };
       connectionPool.set(key, entry);
     } catch (err) {
-      await client.close().catch(() => {});
+      await client.close().catch(() => { });
       throw err;
     }
   }
 
   const { client } = entry;
-  
+
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise((_, reject) => {
     timeoutHandle = setTimeout(() => reject(new Error(`MCP timeout after 30s calling "${toolName}"`)), 30000);
@@ -83,11 +83,11 @@ export async function callRetailerTool(
   } catch (err) {
     // If the connection died, remove it from pool
     connectionPool.delete(key);
-    await client.close().catch(() => {});
+    await client.close().catch(() => { });
     throw err;
   } finally {
     clearTimeout(timeoutHandle!);
-    
+
     // Set idle timer to close connection if not used
     const currentEntry = connectionPool.get(key);
     if (currentEntry) {
@@ -106,7 +106,6 @@ export async function callRetailerTool(
  * Used to verify the MCP URL and key are working during onboarding.
  */
 export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
-  // SEC-2: Validate URL and pin IP to prevent DNS rebinding SSRF
   const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
   const originalHostname = sseUrl.hostname;
   const safeIp = await resolveSafeIp(originalHostname);

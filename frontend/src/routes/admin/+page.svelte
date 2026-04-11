@@ -17,8 +17,9 @@
   import ConfirmModal from "$lib/components/admin/ConfirmModal.svelte";
 
   // --- Auth & State ---
+  // SEC-A: No token in JS memory. Auth is handled via httpOnly cookie set by
+  // the server on login. All requests include credentials: 'include' (see api.ts).
   let isLoggedIn = $state(false);
-  let token = $state<string | null>(null);
 
   // Dashboard State
   let currentTab = $state<AdminTabId>("pending");
@@ -65,12 +66,20 @@
   }
 
   onMount(() => {
-    token = localStorage.getItem("gw_token");
-    if (token) {
-      isLoggedIn = true;
-      loadRetailers();
-      resetActivity();
-    }
+    (async () => {
+      // SEC-A: Check session via /api/auth/me instead of reading a localStorage token.
+      // The httpOnly cookie is sent automatically; if valid the server returns 200.
+      try {
+        const res = await apiFetch("/api/auth/me");
+        if (res.ok) {
+          isLoggedIn = true;
+          loadRetailers();
+          resetActivity();
+        }
+      } catch {
+        // Not logged in — show login panel
+      }
+    })();
 
     const activityEvents = [
       "mousedown",
@@ -102,13 +111,6 @@
     }, 3500);
   }
 
-  function authHeaders() {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    };
-  }
-
   async function api(
     method: string,
     path: string,
@@ -116,7 +118,7 @@
   ): Promise<any> {
     const res = await apiFetch(path, {
       method,
-      headers: authHeaders(),
+      headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (res.status === 401) {
@@ -127,16 +129,16 @@
     return res.json();
   }
 
-  function onLoginSuccess(newToken: string) {
-    token = newToken;
-    localStorage.setItem("gw_token", token);
+  function onLoginSuccess() {
+    // SEC-A: Cookie was set server-side; nothing to store here.
     isLoggedIn = true;
+    resetActivity();
     loadRetailers();
   }
 
-  function logout() {
-    localStorage.removeItem("gw_token");
-    token = null;
+  async function logout() {
+    // Ask the server to clear the httpOnly cookie
+    await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     isLoggedIn = false;
   }
 

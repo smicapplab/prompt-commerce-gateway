@@ -1,6 +1,6 @@
 import {
   Controller, Post, Patch, Get,
-  Param, Body, Headers, UnauthorizedException, NotFoundException,
+  Param, Body, Headers, UnauthorizedException, NotFoundException, BadRequestException,
 } from '@nestjs/common';
 import { IsString, IsOptional, IsBoolean } from 'class-validator';
 import { CatalogService, SyncCategoryDto, SyncProductDto, DeltaPayload } from './catalog.service';
@@ -153,14 +153,14 @@ export class CatalogController {
         (payload.delete?.productIds?.length ?? 0) > MAX_SYNC_BATCH ||
         (payload.delete?.categoryIds?.length ?? 0) > MAX_SYNC_BATCH
       ) {
-        throw new UnauthorizedException(`Sync payload exceeds limit of ${MAX_SYNC_BATCH} items per request.`);
+        throw new BadRequestException(`Sync payload exceeds limit of ${MAX_SYNC_BATCH} items per request.`);
       }
       result = await this.catalog.delta(slug, payload);
     } else {
       // ── Legacy full-snapshot format ───────────────────────────────────────
       const b = body as { categories?: SyncCategoryDto[]; products?: SyncProductDto[] };
       if ((b.categories?.length ?? 0) > MAX_SYNC_BATCH || (b.products?.length ?? 0) > MAX_SYNC_BATCH) {
-        throw new UnauthorizedException(`Sync payload exceeds limit of ${MAX_SYNC_BATCH} items per request.`);
+        throw new BadRequestException(`Sync payload exceeds limit of ${MAX_SYNC_BATCH} items per request.`);
       }
       result = await this.catalog.fullSnapshot(slug, b.categories ?? [], b.products ?? []);
     }

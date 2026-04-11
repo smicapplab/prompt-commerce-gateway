@@ -19,26 +19,26 @@ import {
 
 
 export interface InitiatePaymentInput {
-  orderId:      number;
-  storeSlug:    string;
-  buyerRef:     string;   // Telegram userId as string
-  amount:       number;
-  currency?:    string;
-  description:  string;
-  buyerEmail?:  string;
+  orderId: number;
+  storeSlug: string;
+  buyerRef: string;   // Telegram userId as string
+  amount: number;
+  currency?: string;
+  description: string;
+  buyerEmail?: string;
   // These are assembled by the service from env / request:
-  baseUrl:      string;   // e.g. https://gateway.example.com  (no trailing slash)
+  baseUrl: string;   // e.g. https://gateway.example.com  (no trailing slash)
   providerOverride?: string; // e.g. 'cod' when buyer explicitly chose COD
 }
 
 export interface PaymentRecord {
-  id:          number;
+  id: number;
   referenceId: string;
-  status:      string;
-  paymentUrl:  string | null;
-  successUrl:  string | null;
-  cancelUrl:   string | null;
-  provider:    string;
+  status: string;
+  paymentUrl: string | null;
+  successUrl: string | null;
+  cancelUrl: string | null;
+  provider: string;
 }
 
 @Injectable()
@@ -57,11 +57,11 @@ export class PaymentService {
     private readonly stripeGateway: StripeGateway,
   ) {
     this.adapters = new Map<string, PaymentGateway>([
-      ['mock',      mockGateway],
-      ['cod',       codGateway],
-      ['assisted',  assistedGateway],
-      ['paymongo',  payMongoGateway],
-      ['stripe',    stripeGateway],
+      ['mock', mockGateway],
+      ['cod', codGateway],
+      ['assisted', assistedGateway],
+      ['paymongo', payMongoGateway],
+      ['stripe', stripeGateway],
     ]);
   }
 
@@ -125,13 +125,13 @@ export class PaymentService {
     if (existing && (existing.status === 'pending' || existing.status === 'paid')) {
       this.logger.log(`Returning existing ${existing.status} payment for order ${input.orderId}`);
       return {
-        id:          existing.id,
+        id: existing.id,
         referenceId: existing.referenceId,
-        status:      existing.status,
-        paymentUrl:  existing.paymentUrl,
-        successUrl:  existing.successUrl,
-        cancelUrl:   existing.cancelUrl,
-        provider:    existing.provider,
+        status: existing.status,
+        paymentUrl: existing.paymentUrl,
+        successUrl: existing.successUrl,
+        cancelUrl: existing.cancelUrl,
+        provider: existing.provider,
       };
     }
 
@@ -146,16 +146,16 @@ export class PaymentService {
     const globalDefaultCurrency = process.env.DEFAULT_CURRENCY || (await this.settings.get('default_currency')) || 'PHP';
 
     const orderCtx: OrderContext = {
-      orderId:    input.orderId,
-      storeSlug:  input.storeSlug,
-      amount:     input.amount,
-      currency:   input.currency || globalDefaultCurrency,
+      orderId: input.orderId,
+      storeSlug: input.storeSlug,
+      amount: input.amount,
+      currency: input.currency || globalDefaultCurrency,
       description: input.description,
       buyerEmail: input.buyerEmail,
       webhookUrl: `${input.baseUrl}/webhooks/payment/${input.storeSlug}`,
       successUrl: `${input.baseUrl}/payment/success?store=${input.storeSlug}&order=${input.orderId}`,
-      cancelUrl:  `${input.baseUrl}/payment/cancel?store=${input.storeSlug}&order=${input.orderId}`,
-      apiKey:     retailer.paymentApiKey ?? undefined,
+      cancelUrl: `${input.baseUrl}/payment/cancel?store=${input.storeSlug}&order=${input.orderId}`,
+      apiKey: retailer.paymentApiKey ?? undefined,
       paymentLinkTemplate: paymentLinkTemplate || undefined,
     };
 
@@ -168,29 +168,29 @@ export class PaymentService {
       const payment = await this.prisma.payment.create({
         data: {
           referenceId: result.referenceId,
-          storeSlug:   input.storeSlug,
-          orderId:     input.orderId,
-          buyerRef:    input.buyerRef,
-          amount:      input.amount,
-          currency:    input.currency || globalDefaultCurrency,
+          storeSlug: input.storeSlug,
+          orderId: input.orderId,
+          buyerRef: input.buyerRef,
+          amount: input.amount,
+          currency: input.currency || globalDefaultCurrency,
           provider,
-          status:      result.status,
-          paymentUrl:  result.paymentUrl ?? null,
-          successUrl:  orderCtx.successUrl,
-          cancelUrl:   orderCtx.cancelUrl,
+          status: result.status,
+          paymentUrl: result.paymentUrl ?? null,
+          successUrl: orderCtx.successUrl,
+          cancelUrl: orderCtx.cancelUrl,
           paymentInstructions: instructions,
-          orderCreatedAt:      new Date(),
+          orderCreatedAt: new Date(),
         },
       });
 
       return {
-        id:          payment.id,
+        id: payment.id,
         referenceId: payment.referenceId,
-        status:      payment.status,
-        paymentUrl:  payment.paymentUrl,
-        successUrl:  payment.successUrl,
-        cancelUrl:   payment.cancelUrl,
-        provider:    payment.provider,
+        status: payment.status,
+        paymentUrl: payment.paymentUrl,
+        successUrl: payment.successUrl,
+        cancelUrl: payment.cancelUrl,
+        provider: payment.provider,
       };
     } catch (err: any) {
       // Handle race condition: if another process created the payment record between our check and create
@@ -201,19 +201,19 @@ export class PaymentService {
           where: {
             storeSlug_orderId: {
               storeSlug: input.storeSlug,
-              orderId:   input.orderId,
+              orderId: input.orderId,
             },
           },
         });
         if (raceExisting) {
           return {
-            id:          raceExisting.id,
+            id: raceExisting.id,
             referenceId: raceExisting.referenceId,
-            status:      raceExisting.status,
-            paymentUrl:  raceExisting.paymentUrl,
-            successUrl:  raceExisting.successUrl,
-            cancelUrl:   raceExisting.cancelUrl,
-            provider:    raceExisting.provider,
+            status: raceExisting.status,
+            paymentUrl: raceExisting.paymentUrl,
+            successUrl: raceExisting.successUrl,
+            cancelUrl: raceExisting.cancelUrl,
+            provider: raceExisting.provider,
           };
         }
       }
@@ -225,7 +225,7 @@ export class PaymentService {
 
   async handleWebhook(
     storeSlug: string,
-    body:      unknown,
+    body: unknown,
     signature: string,
   ): Promise<(WebhookEvent & { previousStatus?: string }) | null> {
     const retailer = await this.prisma.retailer.findUnique({
@@ -234,8 +234,7 @@ export class PaymentService {
     if (!retailer) return null;
 
     const adapter = await this.resolveAdapter(this.getPrimaryProvider(retailer));
-    
-    // SEC-1: Reject webhooks if secret is missing for real providers (Stripe, PayMongo).
+
     // Attacker could forge a valid HMAC signature using an empty key if we silently fall back to ''.
     let secret = retailer.paymentWebhookSecret;
     if (!secret) {
@@ -263,7 +262,7 @@ export class PaymentService {
       if (payment && payment.status !== event.status) {
         await this.prisma.payment.update({
           where: { referenceId: event.referenceId },
-          data:  { status: event.status },
+          data: { status: event.status },
         });
       }
     } catch (err) {
@@ -293,15 +292,15 @@ export class PaymentService {
   async updatePaymentConfig(
     storeSlug: string,
     config: {
-      paymentProvider?:      string | null;
-      paymentApiKey?:        string | null;
-      paymentPublicKey?:     string | null;
+      paymentProvider?: string | null;
+      paymentApiKey?: string | null;
+      paymentPublicKey?: string | null;
       paymentWebhookSecret?: string | null;
     },
   ) {
     await this.prisma.retailer.update({
       where: { slug: storeSlug },
-      data:  config,
+      data: config,
     });
   }
 
@@ -309,13 +308,13 @@ export class PaymentService {
 
   async getPaymentConfigStatus(storeSlug: string) {
     const retailer = await this.prisma.retailer.findUnique({
-      where:  { slug: storeSlug },
+      where: { slug: storeSlug },
     });
     return {
-      provider:      this.getPrimaryProvider(retailer),
-      hasApiKey:     !!retailer?.paymentApiKey,
-      hasPublicKey:  !!retailer?.paymentPublicKey,
-      publicKey:     retailer?.paymentPublicKey  ?? null,
+      provider: this.getPrimaryProvider(retailer),
+      hasApiKey: !!retailer?.paymentApiKey,
+      hasPublicKey: !!retailer?.paymentPublicKey,
+      publicKey: retailer?.paymentPublicKey ?? null,
     };
   }
 }

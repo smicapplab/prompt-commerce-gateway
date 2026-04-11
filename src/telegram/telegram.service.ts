@@ -185,15 +185,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   /** Validates the secret token Telegram sends in X-Telegram-Bot-Api-Secret-Token. */
   validateWebhookSecret(token: string): boolean {
     if (!this.webhookSecret || !token) return false;
-    
-    // L1: The stored webhookSecret is a hash. We hash the incoming token and compare.
-    const incomingHash = crypto.createHash('sha256').update(token).digest('hex');
-    
+    // BUG-5: Compare the incoming token directly to the stored plaintext secret
+    // using timingSafeEqual to prevent timing attacks. Buffers must be equal length.
     try {
-      return crypto.timingSafeEqual(
-        Buffer.from(incomingHash),
-        Buffer.from(this.webhookSecret)
-      );
+      const a = Buffer.from(token);
+      const b = Buffer.from(this.webhookSecret);
+      if (a.length !== b.length) return false;
+      return crypto.timingSafeEqual(a, b);
     } catch {
       return false;
     }
@@ -216,19 +214,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private async ensureWebhookSecret(): Promise<string> {
     const stored = await this.settings.get('telegram_webhook_secret');
-    
-    // If already stored, we treat it as the hashed version.
-    // NOTE: This will break once if you have a plaintext secret stored, 
-    // but re-initialising the bot (save TG settings) will fix it.
-    if (stored) return stored;
 
-    // Generate a fresh secret, but store the HASH of it (L1)
+    // BUG-5: Store and return the PLAINTEXT so that:
+    //   1. setWebhook() sends the plaintext to Telegram.
+    //   2. Telegram echoes it back in X-Telegram-Bot-Api-Secret-Token.
+    //   3. validateWebhookSecret() can compare directly with timingSafeEqual.
+    //
+    // Migration note: if `stored` looks like a 64-char SHA-256 hex digest from
+    // the old (broken) scheme, regenerate a fresh plaintext so the webhook is
+    // re-registered correctly on the next setWebhook() call.
+    const looksLikeHash = stored && /^[0-9a-f]{64}$/.test(stored);
+    if (stored && !looksLikeHash) return stored;
+
     const plaintext = crypto.randomBytes(32).toString('hex');
-    const hashed = crypto.createHash('sha256').update(plaintext).digest('hex');
-    
-    await this.settings.set('telegram_webhook_secret', hashed);
-    
-    // We must return the PLAINTEXT to pass to setWebhook()
+    await this.settings.set('telegram_webhook_secret', plaintext);
     return plaintext;
   }
 

@@ -3,6 +3,7 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { z } from 'zod';
 import express from 'express';
 import { RegistryService } from '../registry/registry.service';
+import { KeysService } from '../keys/keys.service';
 import { callRetailerTool, pingRetailer } from './retailer-client';
 
 /**
@@ -25,6 +26,7 @@ const WRITE_TOOLS = new Set([
 export function mountGatewayMcp(
   app: express.Application,
   registry: RegistryService,
+  keys: KeysService,
 ): void {
   // ── Helper: resolve retailer or throw ──────────────────────────────────────
   async function getActiveRetailer(slug: string) {
@@ -44,11 +46,11 @@ export function mountGatewayMcp(
   }
 
   // ── Resolve platform key → store slug ─────────────────────────────────────
+  // PERF-5: Use a direct indexed lookup instead of loading all active retailers.
   async function resolveApiKey(key: string): Promise<string | null> {
     try {
-      const retailers = await registry.findActiveRetailers();
-      const match = retailers.find(r => r.platformKey?.key === key && !r.platformKey?.revokedAt);
-      return match?.slug ?? null;
+      const retailer = await keys.validateKey(key);
+      return retailer?.slug ?? null;
     } catch {
       return null;
     }

@@ -31,8 +31,9 @@ export function parseSearchQuery(raw: string): ParsedQuery {
   if (rangeM) {
     const a = toNum(rangeM[1]);
     const b = toNum(rangeM[2]);
-    // Only treat as a price range if both numbers look like prices (not "2-in-1")
-    if (a > 0 || b > 0) {
+    // IMP-8: Require both values to be finite and positive — prevents product codes
+    // like "USB3.0 to USB-A" or "2-in-1" from corrupting the keywords field.
+    if (Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > 0) {
       minPrice = Math.min(a, b);
       maxPrice = Math.max(a, b);
       text = text.replace(rangeM[0], '').trim();

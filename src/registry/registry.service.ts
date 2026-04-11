@@ -6,14 +6,14 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaClient, Retailer } from '@prisma/client';
-import { 
-  IsString, 
-  IsNotEmpty, 
-  IsEmail, 
-  IsUrl, 
-  IsOptional, 
-  IsBoolean, 
-  IsInt 
+import {
+  IsString,
+  IsNotEmpty,
+  IsEmail,
+  IsUrl,
+  IsOptional,
+  IsBoolean,
+  IsInt
 } from 'class-validator';
 import { PRISMA } from '../prisma/prisma.module';
 import { KeysService } from '../keys/keys.service';
@@ -207,14 +207,13 @@ export class RegistryService {
       data: {
         retailerId,
         event,
-        meta: meta ? JSON.parse(JSON.stringify(meta)) : undefined,
+        meta: meta ? structuredClone(meta) : undefined,
       },
     });
   }
 
   /** Public registration — creates retailer in unverified state, no key yet. */
   async register(dto: RegisterRetailerDto): Promise<Retailer> {
-    // SEC-2: Validate MCP URL to prevent SSRF
     if (!(await isSsrfSafe(dto.mcpServerUrl))) {
       throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
     }
@@ -250,7 +249,6 @@ export class RegistryService {
   async update(id: number, dto: UpdateRetailerDto) {
     const existingRetailer = await this.findById(id);
 
-    // SEC-2: Validate MCP URL to prevent SSRF if changed
     if (dto.mcpServerUrl && !(await isSsrfSafe(dto.mcpServerUrl))) {
       throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
     }
@@ -310,7 +308,6 @@ export class RegistryService {
   }
 
   async updateBySlug(slug: string, dto: UpdateRetailerDto) {
-    // SEC-2: Validate MCP URL to prevent SSRF if changed
     if (dto.mcpServerUrl && !(await isSsrfSafe(dto.mcpServerUrl))) {
       throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
     }

@@ -2,8 +2,10 @@
   import { Lock, Eye, EyeOff, Loader2, ArrowRight } from "lucide-svelte";
   import { apiFetch } from "$lib/api";
 
+  // SEC-A: Callback takes no arguments — the JWT is stored in an httpOnly cookie
+  // by the server, not in JS memory.
   let { onLoginSuccess } = $props<{
-    onLoginSuccess: (token: string) => void;
+    onLoginSuccess: () => void;
   }>();
 
   // Login Form
@@ -24,9 +26,10 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: lUser, password: lPass }),
       });
+      if (res.status === 429) throw new Error("Too many attempts. Try again in 15 minutes.");
       if (!res.ok) throw new Error("Invalid credentials.");
-      const data = await res.json();
-      onLoginSuccess(data.access_token);
+      // Cookie is set by the server — nothing to extract from the body.
+      onLoginSuccess();
     } catch (err: any) {
       loginError = err.message || "Login failed";
     } finally {
