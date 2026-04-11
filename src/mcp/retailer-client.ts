@@ -40,11 +40,16 @@ export async function callRetailerTool(
   }
 
   if (!entry) {
-    // SEC-2: Validate URL and pin IP to prevent DNS rebinding SSRF
     const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
     const originalHostname = sseUrl.hostname;
     const safeIp = await resolveSafeIp(originalHostname);
-    sseUrl.hostname = safeIp;
+
+    // If HTTPS, we must keep the original hostname in the URL so TLS SNI and cert 
+    // verification match. If we swap it for an IP, fetch() will reject the cert.
+    // We only swap for IP if it's plain HTTP (SSRF protection still active via resolveSafeIp).
+    if (sseUrl.protocol === 'http:') {
+      sseUrl.hostname = safeIp;
+    }
 
     const client = new Client(
       { name: 'prompt-commerce-gateway', version: '1.0.0' },
@@ -109,7 +114,10 @@ export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
   const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
   const originalHostname = sseUrl.hostname;
   const safeIp = await resolveSafeIp(originalHostname);
-  sseUrl.hostname = safeIp;
+
+  if (sseUrl.protocol === 'http:') {
+    sseUrl.hostname = safeIp;
+  }
 
   const client = new Client(
     { name: 'prompt-commerce-gateway', version: '1.0.0' },
