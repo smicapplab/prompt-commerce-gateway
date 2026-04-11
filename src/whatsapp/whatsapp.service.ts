@@ -204,8 +204,13 @@ export class WhatsAppService implements OnModuleInit {
       return;
     }
 
-    // Command overrides
-    if (text.toLowerCase() === '/start' || text.toLowerCase() === 'menu' || text.toLowerCase() === 'hi' || text.toLowerCase() === 'hello') {
+    // Command overrides and Greetings
+    const GREETINGS = ['/start', 'menu', 'hi', 'hello', 'hey', 'hello there', 'good morning', 'good afternoon', 'good evening', 'uy', 'oi'];
+    const lowerText = text.trim().toLowerCase();
+    const isGreeting = GREETINGS.includes(lowerText);
+    const isShortUnknown = !session?.step && text.trim().split(/\s+/).length <= 3;
+
+    if (isGreeting || (!session && isShortUnknown)) {
       const activeRetailers = await this.registry.findActiveRetailers();
       if (activeRetailers.length === 0) {
         return this.client.sendText(waId, 'No stores are currently active.');
@@ -217,7 +222,11 @@ export class WhatsAppService implements OnModuleInit {
       } else {
         await this.sessionService.deleteSession(waId, 'main');
         const storeMap = activeRetailers.map(r => ({ slug: r.slug, name: r.name }));
-        return this.client.sendInteractive(waId, buildStoreListMenu(storeMap));
+        const message = isGreeting ? 'Welcome! Please select a store below.' : 'I didn\'t quite catch that, but here are our available stores:';
+        return this.client.sendInteractive(waId, {
+          ...buildStoreListMenu(storeMap),
+          body: { text: message }
+        });
       }
     }
     
@@ -288,11 +297,26 @@ export class WhatsAppService implements OnModuleInit {
     if (session?.step === 'confirm' && text.toLowerCase().includes('place order')) {
       const slug = session.storeSlug;
       const items = await this.cartService.get(cartUserId, slug);
-
-      if (!items.length) return this.client.sendText(waId, 'Your cart is empty.');
-
       const retailer = await this.registry.findBySlug(slug);
-      if (!retailer) return this.client.sendText(waId, 'Store error.');
+
+      if (!items.length) {
+        return this.client.sendInteractive(waId, {
+          type: 'button',
+          body: { text: 'Your cart is empty.' },
+          action: {
+            buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${slug}`, title: '🏠 Main Menu' } }]
+          }
+        });
+      }
+      if (!retailer) {
+        return this.client.sendInteractive(waId, {
+          type: 'button',
+          body: { text: 'Store error.' },
+          action: {
+            buttons: [{ type: 'reply', reply: { id: 'start', title: '⬅️ Change Store' } }]
+          }
+        });
+      }
 
       const user = await this.prisma.whatsAppUser.findUnique({ where: { id: waId } });
 
@@ -350,19 +374,37 @@ export class WhatsAppService implements OnModuleInit {
         if (payment?.paymentUrl) {
           if (payment.paymentUrl.includes('localhost') || payment.paymentUrl.includes('127.0.0.1')) {
             finalMsg += `💳 *Complete Payment:*\n${payment.paymentUrl}`;
+            // For localhost, we have to use sendText because WhatsApp blocks localhost buttons
             await this.client.sendText(waId, finalMsg);
+            // But we can send an interactive menu right after
+            await this.client.sendInteractive(waId, {
+              type: 'button',
+              body: { text: 'What would you like to do next?' },
+              action: {
+                buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${slug}`, title: '🏠 Main Menu' } }]
+              }
+            });
           } else {
             await this.client.sendInteractive(waId, {
               type: 'button',
               body: { text: finalMsg },
               action: {
-                buttons: [{ type: 'reply', reply: { id: `pay:${slug}:${orderId}`, title: 'Pay Now 💳' } }]
+                buttons: [
+                  { type: 'reply', reply: { id: `pay:${slug}:${orderId}`, title: 'Pay Now 💳' } },
+                  { type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${slug}`, title: '🏠 Main Menu' } }
+                ]
               }
             });
           }
         } else {
           finalMsg += `📦 Status: *Pending Delivery*`;
-          await this.client.sendText(waId, finalMsg);
+          await this.client.sendInteractive(waId, {
+            type: 'button',
+            body: { text: finalMsg },
+            action: {
+              buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${slug}`, title: '🏠 Main Menu' } }]
+            }
+          });
         }
 
         // 4. Notify seller if configured
@@ -385,7 +427,13 @@ export class WhatsAppService implements OnModuleInit {
 
       } catch (err: any) {
         this.logger.error(`Checkout failed: ${err.message}`);
-        return this.client.sendText(waId, `❌ Order placement failed: ${err.message}`);
+        return this.client.sendInteractive(waId, {
+          type: 'button',
+          body: { text: `❌ Order placement failed: ${err.message}` },
+          action: {
+            buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${slug}`, title: '🏠 Main Menu' } }]
+          }
+        });
       }
     }
 
@@ -393,7 +441,13 @@ export class WhatsAppService implements OnModuleInit {
     if (session?.step === 'ai_chat') {
       if (text.toLowerCase() === 'exit' || text.toLowerCase() === 'quit') {
         await this.sessionService.setSession(waId, 'main', { ...session, step: undefined });
-        return this.client.sendText(waId, 'Exited AI Assistant mode. Type a search or choose an option from the menu.');
+        return this.client.sendInteractive(waId, {
+          type: 'button',
+          body: { text: 'Exited AI Assistant mode.' },
+          action: {
+            buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${session.storeSlug}`, title: '🏠 Main Menu' } }]
+          }
+        });
       }
 
       const retailer = await this.registry.findBySlug(session.storeSlug);
@@ -477,10 +531,27 @@ export class WhatsAppService implements OnModuleInit {
     const storeResults = results;
 
     if (storeResults.length === 0 && page === 1) {
-      if (!session?.storeSlug) {
-        return this.client.sendText(waId, `🔍 No products found for "${safeText}" across all stores.`);
+      const emptyMsg = session?.storeSlug 
+        ? `🔍 No products found for "${safeText}" in this store.`
+        : `🔍 No products found for "${safeText}" across all stores.`;
+
+      if (session?.storeSlug) {
+        return this.client.sendInteractive(waId, {
+          type: 'button',
+          body: { text: emptyMsg },
+          action: {
+            buttons: [
+              { type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${session.storeSlug}`, title: '🏠 Main Menu' } },
+              { type: 'reply', reply: { id: 'start', title: '⬅️ Change Store' } }
+            ]
+          }
+        });
       } else {
-        return this.client.sendText(waId, `🔍 No products found for "${safeText}" in this store. Type "menu" to change stores.`);
+        const retailers = await this.registry.findActiveRetailers();
+        return this.client.sendInteractive(waId, {
+          ...buildStoreListMenu(retailers.map(r => ({ slug: r.slug, name: r.name }))),
+          body: { text: emptyMsg + ' Please select a store to start shopping.' }
+        });
       }
     }
 
@@ -523,7 +594,13 @@ export class WhatsAppService implements OnModuleInit {
 
     if (action === WA_ACTION.STORE_SELECT || action === WA_ACTION.STORE_MENU || action === 'store' || action === 'store_menu') {
       const targetSlug = parts[1];
-      if (!targetSlug) return this.client.sendText(waId, 'Store selection error. Please try /start.');
+      if (!targetSlug) {
+        const retailers = await this.registry.findActiveRetailers();
+        return this.client.sendInteractive(waId, {
+          ...buildStoreListMenu(retailers.map(r => ({ slug: r.slug, name: r.name }))),
+          body: { text: 'Store selection error. Please select a store below to continue.' }
+        });
+      }
       await this.sessionService.setSession(waId, 'main', { storeSlug: targetSlug });
       return this.showStoreMainMenu(waId, targetSlug);
     }
@@ -537,7 +614,11 @@ export class WhatsAppService implements OnModuleInit {
       const finalOrderId = orderId || parseInt(targetSlug, 10);
 
       if (!finalSlug || !finalOrderId) {
-        return this.client.sendText(waId, '❌ Payment error. Please try starting a new session with /start.');
+        const retailers = await this.registry.findActiveRetailers();
+        return this.client.sendInteractive(waId, {
+          ...buildStoreListMenu(retailers.map(r => ({ slug: r.slug, name: r.name }))),
+          body: { text: '❌ Payment error. Please select a store to start again.' }
+        });
       }
 
       const payment = await this.prisma.payment.findFirst({
@@ -546,20 +627,50 @@ export class WhatsAppService implements OnModuleInit {
       });
 
       if (!payment || !payment.paymentUrl) {
-        return this.client.sendText(waId, `❌ Could not find payment link for Order #${finalOrderId}. Please contact the store.`);
+        return this.client.sendInteractive(waId, {
+          type: 'button',
+          body: { text: `❌ Could not find payment link for Order #${finalOrderId}. Please contact the store.` },
+          action: {
+            buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${finalSlug}`, title: '🏠 Main Menu' } }]
+          }
+        });
       }
 
       return this.client.sendText(waId, `💳 *Complete Payment for Order #${finalOrderId}:*\n${payment.paymentUrl}`);
     }
 
-    const session = await this.sessionService.getSession<any>(waId, 'main');
+    let session = await this.sessionService.getSession<any>(waId, 'main');
+    
+    // ── Issue 1: Auto-restart expired sessions ──────────────────────────────
     if (!session || !session.storeSlug) {
-      return this.client.sendText(waId, 'Your session expired. Please type /start to select a store again.');
+      const recoveredSlug = parts[1];
+      if (recoveredSlug) {
+        const retailer = await this.registry.findBySlug(recoveredSlug);
+        if (retailer) {
+          this.logger.log(`Recovering expired session for ${waId} using slug: ${recoveredSlug}`);
+          session = { storeSlug: recoveredSlug };
+          await this.sessionService.setSession(waId, 'main', session);
+        }
+      }
+    }
+
+    if (!session || !session.storeSlug) {
+      const retailers = await this.registry.findActiveRetailers();
+      if (retailers.length === 0) {
+        return this.client.sendText(waId, 'No stores are currently active. Please try again later.');
+      }
+      if (retailers.length === 1) {
+        const store = retailers[0];
+        await this.sessionService.setSession(waId, 'main', { storeSlug: store.slug });
+        return this.showStoreMainMenu(waId, store.slug);
+      }
+      
+      return this.client.sendInteractive(waId,
+        buildStoreListMenu(retailers.map(r => ({ slug: r.slug, name: r.name }))));
     }
     const slug = session.storeSlug;
 
     if (action === 'confirm_order') {
-      const targetSlug = parts[1];
       // Reuse the existing place order logic by simulating the text message
       return this.routeMessage(waId, session?.name || 'Buyer', 'place order', 'manual_confirm');
     }
@@ -572,8 +683,15 @@ export class WhatsAppService implements OnModuleInit {
 
     if (action === 'cancel_order') {
       const targetSlug = parts[1];
-      await this.sessionService.deleteSession(waId, 'main');
-      return this.client.sendText(waId, '❌ Order cancelled. Type "menu" to start over.');
+      // Instead of deleting session, just clear the checkout step
+      await this.sessionService.setSession(waId, 'main', { ...session, step: undefined });
+      return this.client.sendInteractive(waId, {
+        type: 'button',
+        body: { text: '❌ Order cancelled. What would you like to do next?' },
+        action: {
+          buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${targetSlug}`, title: '🏠 Main Menu' } }]
+        }
+      });
     }
 
     if (action === 'back_to_search') {
@@ -645,7 +763,13 @@ export class WhatsAppService implements OnModuleInit {
       });
 
       if (!product) {
-        return this.client.sendText(waId, 'Product not found.');
+        return this.client.sendInteractive(waId, {
+          type: 'button',
+          body: { text: 'Product not found.' },
+          action: {
+            buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${targetSlug}`, title: '🏠 Main Menu' } }]
+          }
+        });
       }
 
       // If user selected a product from a different store than current session, switch store
@@ -706,7 +830,13 @@ export class WhatsAppService implements OnModuleInit {
       await this.sessionService.setSession(waId, 'main', { ...session, source: 'cart' });
       if (parts[2] === 'clear') {
         await this.cartService.clear(cartUserId, targetSlug);
-        await this.client.sendText(waId, '🗑 Cart cleared.');
+        return this.client.sendInteractive(waId, {
+          type: 'button',
+          body: { text: '🗑 Cart cleared.' },
+          action: {
+            buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${targetSlug}`, title: '🏠 Main Menu' } }]
+          }
+        });
       }
 
       const items = await this.cartService.get(cartUserId, targetSlug);
@@ -922,7 +1052,13 @@ export class WhatsAppService implements OnModuleInit {
 
   private async showPaymentMenu(waId: string, slug: string) {
     const retailer = await this.registry.findBySlug(slug);
-    if (!retailer) return this.client.sendText(waId, 'Store error.');
+    if (!retailer) {
+      const retailers = await this.registry.findActiveRetailers();
+      return this.client.sendInteractive(waId, {
+        ...buildStoreListMenu(retailers.map(r => ({ slug: r.slug, name: r.name }))),
+        body: { text: 'Store error. Please select a store below to continue.' }
+      });
+    }
 
     let methods: string[] = ['cod'];
     try {

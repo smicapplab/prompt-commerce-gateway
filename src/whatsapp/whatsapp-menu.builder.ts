@@ -243,7 +243,7 @@ export function buildSearchNavigation(
   if (cartCount > 0) {
     buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.CART_VIEW}:${storeSlug}`, title: `🛒 Cart (${cartCount})` } });
   } else if (buttons.length < 3) {
-    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏪 Store Menu' } });
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏠 Main Menu' } });
   }
 
   if (buttons.length === 0) return null;
@@ -272,7 +272,7 @@ export function buildProductDetailButtons(product: CachedProduct, storeSlug: str
   } else if (source === 'ai') {
     buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.AI_CHAT}:${storeSlug}`, title: '🤖 Back to AI' } });
   } else {
-    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏪 Store Menu' } });
+    buttons.push({ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏠 Main Menu' } });
   }
 
   const inCartNote = cartCount > 0 ? `\n\n_You already have ${cartCount} in your cart._` : '';
@@ -341,7 +341,7 @@ export function buildCategoryListMenu(storeSlug: string, categories: CachedCateg
         {
           title: 'Options',
           rows: [
-            { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏪 Store Menu', description: 'Go back to main menu' }
+            { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏠 Main Menu', description: 'Go back to main menu' }
           ]
         }
       ]
@@ -379,7 +379,7 @@ export function buildCartMenu(storeSlug: string, itemCount: number): Interactive
       type: 'button',
       body: { text: `Your cart is empty.` },
       action: {
-        buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: 'Browse Products' } }]
+        buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${storeSlug}`, title: '🏠 Main Menu' } }]
       }
     };
   }
