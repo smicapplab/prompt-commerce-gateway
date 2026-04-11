@@ -3,11 +3,13 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaClient, Retailer } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 import { KeysService } from '../keys/keys.service';
 import { MailService } from '../mail/mail.service';
+import { isSsrfSafe } from '../utils/ssrf';
 
 export interface RegisterRetailerDto {
   slug: string;
@@ -104,6 +106,11 @@ export class RegistryService {
 
   /** Public registration — creates retailer in unverified state, no key yet. */
   async register(dto: RegisterRetailerDto): Promise<Retailer> {
+    // SEC-2: Validate MCP URL to prevent SSRF
+    if (!(await isSsrfSafe(dto.mcpServerUrl))) {
+      throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
+    }
+
     const existingSlug = await this.prisma.retailer.findUnique({
       where: { slug: dto.slug },
     });
@@ -134,6 +141,11 @@ export class RegistryService {
   /** Admin: update retailer details or verification status. */
   async update(id: number, dto: UpdateRetailerDto) {
     const existingRetailer = await this.findById(id);
+
+    // SEC-2: Validate MCP URL to prevent SSRF if changed
+    if (dto.mcpServerUrl && !(await isSsrfSafe(dto.mcpServerUrl))) {
+      throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
+    }
 
     // Auto-issue a key when admin verifies the retailer for the first time
     const becomesVerified = dto.verified === true && !existingRetailer.verified;
@@ -190,6 +202,11 @@ export class RegistryService {
   }
 
   async updateBySlug(slug: string, dto: UpdateRetailerDto) {
+    // SEC-2: Validate MCP URL to prevent SSRF if changed
+    if (dto.mcpServerUrl && !(await isSsrfSafe(dto.mcpServerUrl))) {
+      throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
+    }
+
     return this.prisma.retailer.update({
       where: { slug },
       data: dto,

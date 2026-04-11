@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { isSsrfSafe } from '../utils/ssrf';
 
 export interface RetailerTarget {
   slug: string;
@@ -17,6 +18,11 @@ export async function callRetailerTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
+  // SEC-2: Validate URL to prevent SSRF
+  if (!(await isSsrfSafe(retailer.mcpServerUrl))) {
+    throw new Error(`Insecure MCP Server URL: ${retailer.mcpServerUrl}`);
+  }
+
   const client = new Client(
     { name: 'prompt-commerce-gateway', version: '1.0.0' },
     { capabilities: {} },
@@ -54,6 +60,11 @@ export async function callRetailerTool(
  * Used to verify the MCP URL and key are working during onboarding.
  */
 export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
+  // SEC-2: Validate URL to prevent SSRF
+  if (!(await isSsrfSafe(retailer.mcpServerUrl))) {
+    return false;
+  }
+
   const client = new Client(
     { name: 'prompt-commerce-gateway', version: '1.0.0' },
     { capabilities: {} },
