@@ -734,25 +734,31 @@ export class WhatsAppService implements OnModuleInit {
       const address = await this.prisma.whatsAppAddress.findUnique({ where: { id: addressId } });
       if (!address || address.userId !== waId) return this.client.sendText(waId, 'Address error.');
 
+      // Promote to default (most recently used)
+      await this.prisma.whatsAppAddress.updateMany({ where: { userId: waId, isDefault: true }, data: { isDefault: false } });
+      await this.prisma.whatsAppAddress.update({ where: { id: addressId }, data: { isDefault: true } });
+
       const retailer = await this.registry.findBySlug(targetSlug);
-      const addressStr = `${address.streetLine}, ${address.barangay ? address.barangay + ', ' : ''}${address.city}, ${address.province}`;
+      const addressStr = [address.streetLine, address.barangay, address.city, address.province, address.postalCode].filter(Boolean).join(', ');
       
+      const sessionUpdate = {
+        ...session,
+        storeSlug: targetSlug,
+        address: addressStr,
+        province: address.province,
+        city: address.city,
+        barangay: address.barangay || '',
+        streetLine: address.streetLine,
+        postalCode: address.postalCode || '',
+        lat: Number(address.lat) || undefined,
+        lng: Number(address.lng) || undefined,
+      };
+
       if (retailer?.allowsPickup) {
-        await this.sessionService.setSession(waId, 'main', {
-          ...session,
-          storeSlug: targetSlug,
-          address: addressStr,
-          step: 'delivery'
-        });
+        await this.sessionService.setSession(waId, 'main', { ...sessionUpdate, step: 'delivery' });
         return this.client.sendInteractive(waId, buildDeliveryMenu(targetSlug, true));
       } else {
-        await this.sessionService.setSession(waId, 'main', {
-          ...session,
-          storeSlug: targetSlug,
-          address: addressStr,
-          deliveryType: 'delivery',
-          step: 'payment'
-        });
+        await this.sessionService.setSession(waId, 'main', { ...sessionUpdate, deliveryType: 'delivery', step: 'payment' });
         return this.showPaymentMenu(waId, targetSlug);
       }
     }
@@ -883,6 +889,7 @@ export class WhatsAppService implements OnModuleInit {
           barangay,
           city,
           province,
+          postalCode: session.postalCode ?? null,
           lat: session.lat ?? null,
           lng: session.lng ?? null,
           isDefault: addressCount === 0
@@ -891,7 +898,7 @@ export class WhatsAppService implements OnModuleInit {
     }
 
     const addressStr = session.address || 
-      [session.streetLine, barangay, city, province].filter(Boolean).join(', ');
+      [session.streetLine, barangay, city, province, session.postalCode].filter(Boolean).join(', ');
     
     const retailer = await this.registry.findBySlug(session.storeSlug);
 
@@ -939,6 +946,7 @@ export class WhatsAppService implements OnModuleInit {
       barangay:         String(address.barangay    || '').slice(0, 100),
       city:             String(address.city        || '').slice(0, 100),
       province:         String(address.province    || '').slice(0, 100),
+      postalCode:       String(address.postalCode  || '').slice(0, 20),
       formattedAddress: String(address.formattedAddress || '').slice(0, 300),
       lat:  typeof address.lat === 'number' ? address.lat : null,
       lng:  typeof address.lng === 'number' ? address.lng : null,
@@ -951,6 +959,7 @@ export class WhatsAppService implements OnModuleInit {
       barangay: clean.barangay,
       city: clean.city,
       province: clean.province,
+      postalCode: clean.postalCode,
       address: clean.formattedAddress,
       lat: clean.lat,
       lng: clean.lng,

@@ -36,6 +36,7 @@ interface CheckoutState {
   city?:         string;
   barangay?:     string;
   streetLine?:   string;
+  postalCode?:   string;
   addressId?:    number;
   lat?:          number;
   lng?:          number;
@@ -422,8 +423,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           const id = parseInt(action);
           const addr = await this.prisma.telegramAddress.findUnique({ where: { id } });
           if (addr && addr.userId === userId) {
+            // Promote to default (most recently used)
+            await this.prisma.telegramAddress.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
+            await this.prisma.telegramAddress.update({ where: { id }, data: { isDefault: true } });
+
             state.addressId = id;
-            state.address = `${addr.streetLine}, ${addr.city}, ${addr.province}`;
+            state.province = addr.province;
+            state.city = addr.city;
+            state.barangay = addr.barangay || '';
+            state.streetLine = addr.streetLine;
+            state.postalCode = addr.postalCode || '';
+            state.lat = Number(addr.lat) || undefined;
+            state.lng = Number(addr.lng) || undefined;
+            state.address = [addr.streetLine, addr.barangay, addr.city, addr.province, addr.postalCode].filter(Boolean).join(', ');
             
             const retailer = await this.getRetailer(state.storeSlug);
             if (retailer.allowsPickup) {
@@ -657,6 +669,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       barangay:         String(address.barangay    || '').slice(0, 100),
       city:             String(address.city        || '').slice(0, 100),
       province:         String(address.province    || '').slice(0, 100),
+      postalCode:       String(address.postalCode  || '').slice(0, 20),
       formattedAddress: String(address.formattedAddress || '').slice(0, 300),
       lat:  typeof address.lat === 'number' ? address.lat : null,
       lng:  typeof address.lng === 'number' ? address.lng : null,
@@ -667,6 +680,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     state.city = clean.city;
     state.barangay = clean.barangay;
     state.streetLine = clean.streetLine;
+    state.postalCode = clean.postalCode;
     state.address = clean.formattedAddress;
     state.lat = clean.lat;
     state.lng = clean.lng;
@@ -1291,6 +1305,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           barangay,
           city,
           province,
+          postalCode: state.postalCode ?? null,
           lat: state.lat ?? null,
           lng: state.lng ?? null,
           isDefault: addressCount === 0
@@ -1299,7 +1314,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       state.addressId = addressRecord.id;
     }
 
-    state.address = [state.streetLine, barangay, city, province].filter(Boolean).join(', ');
+    state.address = [state.streetLine, barangay, city, province, state.postalCode].filter(Boolean).join(', ');
     const retailer = await this.getRetailer(state.storeSlug);
     if (retailer.allowsPickup) {
       state.step = 'delivery';
