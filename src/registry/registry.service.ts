@@ -28,11 +28,14 @@ export interface UpdateRetailerDto {
   aiProvider?: string | null;
   aiApiKey?: string | null;
   aiModel?: string | null;
+  aiEnabled?: boolean;
   aiSystemPrompt?: string | null;
   serperApiKey?: string | null;
   // Telegram and WhatsApp seller notifications
   telegramNotifyChatId?: string | null;
+  telegramEnabled?: boolean;
   whatsappNotifyNumber?: string | null;
+  whatsappEnabled?: boolean;
   // Payment gateway config
   paymentProvider?: string | null;
   paymentApiKey?: string | null;

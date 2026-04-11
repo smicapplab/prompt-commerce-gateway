@@ -16,12 +16,14 @@ The customer-facing hub of the Prompt Commerce network. The gateway connects ind
 ```
 prompt-commerce-gateway/
   src/
+    address-picker/ ← Google Places Mini App controller + one-time token service
     catalog/        ← Product cache (CachedProduct, CachedCategory) + Unified Search + delta sync
     orders/         ← Order sync receiver, gateway order ledger, fulfillment metrics
     payments/       ← Payment adapter pattern (Mock / COD / Assisted / PayMongo / Stripe)
     registry/       ← Retailer registry + gateway key issuance
     settings/       ← Key-value store for bot token, global config, default payment provider
     telegram/       ← Telegram bot (grammy) + AI chat + persistent cart + order status notifications
+    whatsapp/       ← WhatsApp bot (Meta Cloud API) — full checkout, AI chat, order notifications
     mcp/            ← retailer-client.ts — HTTP calls to seller MCP server
   frontend/
     src/
@@ -36,7 +38,11 @@ prompt-commerce-gateway/
   shared/
     types.ts        ← Shared TypeScript interfaces used by both NestJS backend and SvelteKit frontend
   prisma/
-    schema/         ← Split schema files (retailers, catalog, carts, payments, order-attachments, settings, admin)
+    schema/         ← Split schema files (retailers, catalog, carts, payments, order-attachments,
+                       telegram_users, telegram_sessions, whatsapp_users, whatsapp_sessions,
+                       address_picker, ph_locations, conversations, settings, admin)
+  public/
+    address-picker.html ← Google Places Mini App (token + API key injected at serve time)
 ```
 
 **Ports:**
@@ -89,18 +95,21 @@ The gateway parses natural language queries into structured filters. This logic 
 
 Cart items are stored in PostgreSQL (`carts` table) and survive gateway restarts. Per-user, per-store scoping with upsert-based quantity increment (clamped 1–99).
 
+### WhatsApp Shopping Bot
+
+Full checkout and AI chat parity with the Telegram bot, delivered via Meta Cloud API webhooks. The same address picker mini app, order sync, and saved profile/address logic applies. Users are keyed by their WhatsApp phone number.
+
 ### Checkout & Order Flow
 
 - **Rich Search Results**: Products with images are returned as individual photo cards with prominent pricing and one-step action buttons (Add to Cart, Buy Now). Fallbacks to text lists for pagination or items lacking images.
 - **Smart Profile Extraction**: Seamless checkout flow automatically prefills the customer's name and email if they have ordered before, skipping redundant prompts.
-- **Structured Address Collection**: We utilize the **Philippine Geographic Data (PSGC)** to enforce a strictly-typed, multi-step geographic parsing flow:
-  - Text-based smart search dynamically filters `Provinces` → `Cities` → `Barangays`.
-  - Customers can save their addresses as "Home", "Office", etc. for 1-click checkouts on future orders.
+- **Google Places Address Picker (Mini App)**: Buyers tap a button to open an in-app web form powered by the Google Places API. It shows real-time address suggestions (Philippines-scoped), captures a fully structured address including `streetLine`, `barangay`, `city`, `province`, `postalCode`, `lat`, and `lng`, and submits via a secure one-time token (10-min TTL). Cancelling falls back to free-text entry.
+- **Saved Addresses**: After entering an address (via picker or free text), buyers are prompted to save it as "Home", "Office", or a custom label. Saved addresses appear as one-tap quick-pick buttons on future checkouts.
 - **Payment Method Selection**: Dynamically offers a choice of all enabled methods (COD, Mock, PayMongo, Stripe, Assisted) based on seller configuration.
 - **Dynamic Delivery Options**: Supports both Home Delivery and Store Pickup based on seller settings.
 - **Input validation**: Name (1–100 chars), email (RFC-compliant regex + 254-char max), address (1–300 chars).
 - **Order rate limiting**: Atomic one-order-per-30-seconds guard per user to prevent double-submissions.
-- **Automated Customer Notifications**: Buyers receive real-time Telegram updates for every status change.
+- **Automated Customer Notifications**: Buyers receive real-time Telegram/WhatsApp updates for every order status change.
 - **Robust Order Tracking**: Full support for tracking numbers and courier links mirrored from the seller.
 
 ### Payment Integration (Universal Adapter)
@@ -186,6 +195,7 @@ All config is pushed from the seller; the gateway has no separate config UIs for
 | `PATCH /api/stores/:slug/payment-config` | Payment methods array, provider keys, webhook secret, payment instructions |
 | `PATCH /api/stores/:slug/store-config` | `allowsPickup` flag |
 | `PATCH /api/stores/:slug/telegram-config` | Seller's Telegram notification chat ID |
+| `PATCH /api/stores/:slug/google-config` | `googlePlacesBrowserKey` (address picker), `googleMapsEmbedKey` (order maps) |
 
 Each has a corresponding `GET …/status` endpoint polled by the seller UI to confirm the push landed.
 
@@ -330,11 +340,24 @@ POST /api/stores/:slug/orders/sync
 Headers: x-gateway-key: <platform_key>
 Body: {
   upsert: {
-    orders:     [{ id, status, delivery_type, tracking_number, ... }],
+    orders: [{
+      id, status, delivery_type, tracking_number, courier_name, tracking_url,
+      cancellation_reason, payment_provider, payment_instructions,
+      created_at, updated_at, buyer_ref, total    ← buyer_ref + total required for
+    }],                                              manual-order placeholder records
     orderNotes: [{ id, order_id, note, created_by, deleted_at, ... }],
     orderFiles: [{ id, order_id, file_url, mime_type, size_bytes, ... }]
   }
 }
+```
+
+### Address Picker
+
+```
+GET  /address-picker?token=<uuid>         ← serves Mini App HTML (validates token, injects API key)
+POST /address-picker/submit               ← consumes token; routes to channel handler
+Body (confirm):  { token, address: { streetLine, barangay, city, province, postalCode, lat, lng, formattedAddress } }
+Body (cancel):   { token, cancelled: true }
 ```
 
 ### Config Push (from seller)
@@ -378,6 +401,7 @@ PATCH  /api/retailers/:id       ← verify, issue key, suspend
 | AI (Claude) | `@anthropic-ai/sdk` |
 | AI (Gemini) | `@google/generative-ai` |
 | AI (OpenAI) | `openai` |
+| Address Picker | Google Places New JS Library (AutocompleteSuggestion + Place.fetchFields) |
 | Auth | JWT (`@nestjs/jwt` + Passport), 1h idle / 4h absolute session limit |
 | Process manager | PM2 |
 
@@ -385,10 +409,10 @@ PATCH  /api/retailers/:id       ← verify, issue key, suspend
 
 ## Roadmap
 
-- [ ] **WhatsApp Business Bot** — Full parity with Telegram: search, cart, checkout, AI chat. Uses Meta Cloud API with webhook-based FSM session state.
 - [ ] **Vector / semantic search** — product embeddings via HuggingFace (`all-MiniLM-L6-v2`) stored in pgvector.
 - [x] **Telegram webhook mode** — supported alongside polling mode; configure URL via admin Settings tab.
-- [ ] **Web Storefront Cart & Checkout** — full shopping flow in the browser (currently Telegram-only).
+- [x] **WhatsApp Business Bot** — Full parity with Telegram: search, cart, checkout (Google Places address picker), AI chat, order notifications via Meta Cloud API.
+- [ ] **Web Storefront Cart & Checkout** — full shopping flow in the browser (currently Telegram/WhatsApp-only).
 - [ ] **Multi-language bot responses**.
 
 ---

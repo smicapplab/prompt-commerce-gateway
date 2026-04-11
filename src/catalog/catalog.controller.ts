@@ -82,6 +82,7 @@ export class CatalogController {
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
     @Body() body: {
+      aiEnabled?:      boolean;
       aiProvider?:     string;
       aiApiKey?:       string;
       aiModel?:        string;
@@ -92,6 +93,7 @@ export class CatalogController {
     const retailer = await this.validateKey(slug, platformKey);
 
     await this.registry.update(retailer.id, {
+      aiEnabled:      body.aiEnabled      !== undefined ? body.aiEnabled      : retailer.aiEnabled,
       aiProvider:     body.aiProvider     ?? null,
       aiApiKey:       body.aiApiKey       ?? null,
       aiModel:        body.aiModel        ?? null,
@@ -208,12 +210,19 @@ export class CatalogController {
   async setMessagingConfig(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: { telegramChatId?: string | null; whatsappNumber?: string | null },
+    @Body() body: { 
+      telegramEnabled?: boolean;
+      whatsappEnabled?: boolean;
+      telegramChatId?:  string | null; 
+      whatsappNumber?:  string | null 
+    },
   ) {
     const retailer = await this.validateKey(slug, platformKey);
     await this.registry.update(retailer.id, {
-      telegramNotifyChatId: body.telegramChatId !== undefined ? body.telegramChatId : retailer.telegramNotifyChatId,
-      whatsappNotifyNumber: body.whatsappNumber !== undefined ? body.whatsappNumber : retailer.whatsappNotifyNumber,
+      telegramEnabled:      body.telegramEnabled !== undefined ? body.telegramEnabled : retailer.telegramEnabled,
+      whatsappEnabled:      body.whatsappEnabled !== undefined ? body.whatsappEnabled : retailer.whatsappEnabled,
+      telegramNotifyChatId: body.telegramChatId  !== undefined ? body.telegramChatId  : retailer.telegramNotifyChatId,
+      whatsappNotifyNumber: body.whatsappNumber  !== undefined ? body.whatsappNumber  : retailer.whatsappNotifyNumber,
     });
     return { message: `Messaging config updated for "${slug}".` };
   }
