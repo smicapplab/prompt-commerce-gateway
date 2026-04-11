@@ -111,6 +111,7 @@
     }
     
     let selectedPlace   = null;
+    let AutocompleteSessionToken = null;
     let AutocompleteSuggestion = null;
     let Place           = null;
     let sessionToken    = null;
@@ -128,9 +129,10 @@
     // Load libraries using the new loader
     async function init() {
       try {
-        const { AutocompleteSessionToken, AutocompleteSuggestion: AS } = await google.maps.importLibrary("places");
+        const { AutocompleteSessionToken: AST, AutocompleteSuggestion: AS } = await google.maps.importLibrary("places");
         const { Place: P } = await google.maps.importLibrary("places");
         
+        AutocompleteSessionToken = AST;
         AutocompleteSuggestion = AS;
         Place = P;
         sessionToken = new AutocompleteSessionToken();
@@ -243,7 +245,7 @@
         console.log('Details fetched:', place);
 
         // Rotate session token
-        sessionToken = new google.maps.AutocompleteSessionToken();
+        sessionToken = new AutocompleteSessionToken();
 
         selectedPlace = place;
         input.value = place.formattedAddress;
