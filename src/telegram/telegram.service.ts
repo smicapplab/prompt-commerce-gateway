@@ -572,60 +572,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
     });
 
-    // ── Web App Data (Address Picker) ───────────────────────────────────────
-    bot.on('message:web_app_data', async (ctx) => {
-      const userId = await this.syncUser(ctx);
-      if (!userId) return;
-
-      const state = this.checkoutSessions.get(userId);
-      if (!state) return;
-
-      try {
-        const data = JSON.parse(ctx.message.web_app_data.data);
-
-        if (data.cancelled) {
-          state.step = 'freeAddress';
-          this.checkoutSessions.set(userId, state);
-          await ctx.reply(
-            '📍 No problem! Please type your full delivery address:\n' +
-            '<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>',
-            { parse_mode: 'HTML' }
-          );
-          return;
-        }
-
-        // Standard address payload from Google Places
-        state.province = data.province;
-        state.city = data.city;
-        state.barangay = data.barangay || '';
-        state.streetLine = data.streetLine;
-        state.address = data.formattedAddress;
-        state.lat = data.lat ?? null;
-        state.lng = data.lng ?? null;
-        state.step = 'labelType';
-        this.checkoutSessions.set(userId, state);
-
-        await ctx.reply(`✅ <b>Address confirmed:</b>\n${data.formattedAddress}`, { parse_mode: 'HTML' });
-        
-        const kb = new InlineKeyboard()
-          .text('🏠 Home', 'lbl:Home')
-          .text('🏢 Office', 'lbl:Office').row()
-          .text('❌ Don\'t save, just use once', 'lbl:skip');
-        
-        await ctx.reply('💾 <b>Save Address As:</b>\n\nChoose a label, or type your own custom label (e.g. "Condo").', { parse_mode: 'HTML', reply_markup: kb });
-      } catch (err) {
-        this.logger.error(`Web App data error: ${err}`);
-        state.step = 'freeAddress';
-        this.checkoutSessions.set(userId, state);
-        await ctx.reply(
-          '⚠️ Sorry, there was an error processing your address.\n\n' +
-          'Please type your full delivery address directly in the chat:\n' +
-          '<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>',
-          { parse_mode: 'HTML' }
-        );
-      }
-    });
-
     // ── Text messages ──────────────────────────────────────────────────────
     bot.on('message:text', async (ctx) => {
       const userId = await this.syncUser(ctx);

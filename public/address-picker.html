@@ -283,11 +283,6 @@
       const address = parsePlace(selectedPlace, unitInput.value.trim());
       const payload = { token, address };
 
-      // Parallel execution: send to server (robust) and via sendData (if available)
-      if (channel === 'telegram') {
-        try { window.Telegram.WebApp.sendData(JSON.stringify(address)); } catch(e) {}
-      }
-
       try {
         const res = await fetch('/address-picker/submit', {
           method: 'POST',
@@ -322,10 +317,6 @@
 
     // ── Cancel ───────────────────────────────────────────────────────────────
     cancelBtn.addEventListener('click', async () => {
-      if (channel === 'telegram') {
-        try { window.Telegram.WebApp.sendData(JSON.stringify({ cancelled: true })); } catch(e) {}
-      }
-      
       try {
         await fetch('/address-picker/submit', {
           method: 'POST',
