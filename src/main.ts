@@ -2,6 +2,7 @@ import 'dotenv/config';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { ValidationPipe } from '@nestjs/common';
 import path from 'path';
 import fs from 'fs';
 import { AppModule } from './app.module';
@@ -19,6 +20,16 @@ async function bootstrap(): Promise<void> {
     logger: ['error', 'warn', 'log'],
     bodyParser: false,
   });
+
+  // Enable 'trust proxy' so that req.ip is correct when behind a reverse proxy (e.g. Nginx, Cloudflare, Render)
+  app.set('trust proxy', true);
+
+  // Apply global validation pipe
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }));
 
   // ── CORS ───────────────────────────────────────────────────────────────────
   // SEC-6: Restrict CORS to trusted origins

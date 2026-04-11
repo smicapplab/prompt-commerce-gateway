@@ -10,8 +10,15 @@ const KNOWN_WEAK_SECRETS = new Set([
   '',
 ]);
 
+const KNOWN_WEAK_PASSWORDS = new Set([
+  'admin123',
+  'password',
+  '123456',
+  '',
+]);
+
 /**
- * Ensures that JWT_SECRET is set and strong in the gateway's .env file.
+ * Ensures that JWT_SECRET and ADMIN_PASSWORD are set and strong in the gateway's .env file.
  * Mirrors the auto-generation logic from the seller's migrate.ts.
  */
 export function ensureEnvSetup(): void {
@@ -31,21 +38,44 @@ export function ensureEnvSetup(): void {
 
   // 2. Load current secret (dotenv is already loaded in main.ts, but we check the file to persist it)
   let envContent = fs.readFileSync(envPath, 'utf8');
+
+  // Check JWT_SECRET
   const secretMatch = envContent.match(/^JWT_SECRET=(.*)$/m);
   const currentSecret = secretMatch ? secretMatch[1].trim() : (process.env.JWT_SECRET ?? '');
 
   if (!currentSecret || currentSecret.length < 32 || KNOWN_WEAK_SECRETS.has(currentSecret.toLowerCase())) {
     const generated = crypto.randomBytes(32).toString('hex');
     const newLine = `JWT_SECRET=${generated}`;
-    
+
     if (secretMatch) {
       envContent = envContent.replace(/^JWT_SECRET=.*$/m, newLine);
     } else {
       envContent += `\n${newLine}\n`;
     }
-    
+
     fs.writeFileSync(envPath, envContent, 'utf8');
     process.env.JWT_SECRET = generated; // Apply to current process
     console.log('✔  Generated and saved strong JWT_SECRET to .env');
+  }
+
+  // Check ADMIN_PASSWORD
+  const passwordMatch = envContent.match(/^ADMIN_PASSWORD=(.*)$/m);
+  const currentPassword = passwordMatch ? passwordMatch[1].trim() : (process.env.ADMIN_PASSWORD ?? '');
+
+  if (!currentPassword || currentPassword.length < 8 || KNOWN_WEAK_PASSWORDS.has(currentPassword.toLowerCase())) {
+    // Generate a shorter but secure password for readability
+    const generated = crypto.randomBytes(12).toString('base64').replace(/[/+=]/g, 'x');
+    const newLine = `ADMIN_PASSWORD=${generated}`;
+
+    if (passwordMatch) {
+      envContent = envContent.replace(/^ADMIN_PASSWORD=.*$/m, newLine);
+    } else {
+      envContent += `\n${newLine}\n`;
+    }
+
+    fs.writeFileSync(envPath, envContent, 'utf8');
+    process.env.ADMIN_PASSWORD = generated; // Apply to current process
+    console.log(`✔  Generated and saved strong ADMIN_PASSWORD to .env: ${generated}`);
+    console.log('   !!! Write this password down! You will need it to login to the admin panel. !!!');
   }
 }

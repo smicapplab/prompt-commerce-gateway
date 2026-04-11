@@ -23,7 +23,14 @@ import { diskStorage } from 'multer';
 import path from 'path';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KeysService } from '../keys/keys.service';
-import { RegistryService, type RegisterRetailerDto, type UpdateRetailerDto } from './registry.service';
+import { IsBoolean, IsOptional } from 'class-validator';
+import { RegistryService, RegisterRetailerDto, UpdateRetailerDto } from './registry.service';
+
+class UpdateStoreConfigDto {
+  @IsOptional()
+  @IsBoolean()
+  allowsPickup?: boolean;
+}
 
 // ── Public registration ────────────────────────────────────────────────────────
 
@@ -83,7 +90,7 @@ export class StoresController {
   @Patch(':slug/store-config')
   async updateStoreConfig(
     @Param('slug') slug: string,
-    @Body() body: { allowsPickup?: boolean },
+    @Body() body: UpdateStoreConfigDto,
     @Headers('x-gateway-key') platformKey: string,
   ) {
     if (!platformKey) throw new UnauthorizedException('x-gateway-key header required.');

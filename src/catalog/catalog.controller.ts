@@ -2,9 +2,102 @@ import {
   Controller, Post, Patch, Get,
   Param, Body, Headers, UnauthorizedException, NotFoundException,
 } from '@nestjs/common';
-import { CatalogService, type SyncCategoryDto, type SyncProductDto, type DeltaPayload } from './catalog.service';
+import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { CatalogService, SyncCategoryDto, SyncProductDto, DeltaPayload } from './catalog.service';
 import { KeysService } from '../keys/keys.service';
 import { RegistryService } from '../registry/registry.service';
+
+class SetAiConfigDto {
+  @IsOptional()
+  @IsBoolean()
+  aiEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  aiProvider?: string;
+
+  @IsOptional()
+  @IsString()
+  aiApiKey?: string;
+
+  @IsOptional()
+  @IsString()
+  aiModel?: string;
+
+  @IsOptional()
+  @IsString()
+  aiSystemPrompt?: string;
+
+  @IsOptional()
+  @IsString()
+  serperApiKey?: string;
+}
+
+class SetPaymentConfigDto {
+  @IsOptional()
+  @IsString()
+  paymentProvider?: string | null;
+
+  @IsOptional()
+  @IsString()
+  paymentApiKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  paymentPublicKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  paymentWebhookSecret?: string | null;
+
+  @IsOptional()
+  @IsString()
+  paymentInstructions?: string | null;
+
+  @IsOptional()
+  @IsString()
+  paymentLinkTemplate?: string | null;
+
+  @IsOptional()
+  @IsString()
+  assistedLabel?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  allowCod?: boolean;
+
+  @IsOptional()
+  @IsString()
+  paymentMethods?: string;
+}
+
+class SetMessagingConfigDto {
+  @IsOptional()
+  @IsBoolean()
+  telegramEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  whatsappEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  telegramChatId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  whatsappNumber?: string | null;
+}
+
+class SetGoogleConfigDto {
+  @IsOptional()
+  @IsString()
+  googlePlacesBrowserKey?: string | null;
+
+  @IsOptional()
+  @IsString()
+  googleMapsEmbedKey?: string | null;
+}
 
 // ─── Platform-key guard (shared by both endpoints) ───────────────────────────
 // The seller doesn't hold a gateway JWT — it authenticates with its platform
@@ -36,7 +129,7 @@ export class CatalogController {
   async sync(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: any, // We keep any here because it can be DeltaPayload or Legacy format
   ) {
     await this.validateKey(slug, platformKey);
 
@@ -45,9 +138,9 @@ export class CatalogController {
     // ── Validation: Limit batch size ────────────────────────────────────────
     const MAX_SYNC_BATCH = 1000;
 
-    if ('upsert' in body) {
+    if (body.upsert || body.delete) {
       // ── Delta format ──────────────────────────────────────────────────────
-      const payload = body as unknown as DeltaPayload;
+      const payload = body as DeltaPayload;
       if (
         (payload.upsert?.products?.length ?? 0) > MAX_SYNC_BATCH ||
         (payload.upsert?.categories?.length ?? 0) > MAX_SYNC_BATCH ||
@@ -81,14 +174,7 @@ export class CatalogController {
   async setAiConfig(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: {
-      aiEnabled?:      boolean;
-      aiProvider?:     string;
-      aiApiKey?:       string;
-      aiModel?:        string;
-      aiSystemPrompt?: string;
-      serperApiKey?:   string;
-    },
+    @Body() body: SetAiConfigDto,
   ) {
     const retailer = await this.validateKey(slug, platformKey);
 
@@ -132,17 +218,7 @@ export class CatalogController {
   async setPaymentConfig(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: {
-      paymentProvider?:      string | null;
-      paymentApiKey?:        string | null;
-      paymentPublicKey?:     string | null;
-      paymentWebhookSecret?: string | null;
-      paymentInstructions?: string | null;
-      paymentLinkTemplate?: string | null;
-      assistedLabel?:       string | null;
-      allowCod?:            boolean;
-      paymentMethods?:      string;
-    },
+    @Body() body: SetPaymentConfigDto,
   ) {
     const retailer = await this.validateKey(slug, platformKey);
 
@@ -210,12 +286,7 @@ export class CatalogController {
   async setMessagingConfig(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: { 
-      telegramEnabled?: boolean;
-      whatsappEnabled?: boolean;
-      telegramChatId?:  string | null; 
-      whatsappNumber?:  string | null 
-    },
+    @Body() body: SetMessagingConfigDto,
   ) {
     const retailer = await this.validateKey(slug, platformKey);
     await this.registry.update(retailer.id, {
@@ -253,10 +324,7 @@ export class CatalogController {
   async setGoogleConfig(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: {
-      googlePlacesBrowserKey?: string | null;
-      googleMapsEmbedKey?:     string | null;
-    },
+    @Body() body: SetGoogleConfigDto,
   ) {
     const retailer = await this.validateKey(slug, platformKey);
 

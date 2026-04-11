@@ -23,6 +23,7 @@ import {
   HttpStatus,
   Inject,
 } from '@nestjs/common';
+import { IsString, IsOptional } from 'class-validator';
 
 import { Request, Response } from 'express';
 import { PaymentService } from './payment.service';
@@ -31,6 +32,12 @@ import { SettingsService } from '../settings/settings.service';
 import { KeysService } from '../keys/keys.service';
 import { PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
+
+class SetBotConfigDto {
+  @IsOptional()
+  @IsString()
+  webhookUrl?: string | null;
+}
 
 @Controller()
 export class WebhookController {
@@ -55,7 +62,7 @@ export class WebhookController {
   @Patch('api/bot/telegram')
   async setBotConfig(
     @Headers('x-gateway-key') gatewayKey: string,
-    @Body() body: { webhookUrl?: string | null },
+    @Body() body: SetBotConfigDto,
   ) {
     await this.validateAnyStoreKey(gatewayKey);
 
@@ -153,7 +160,12 @@ export class WebhookController {
     @Headers('paymongo-signature') paymongoSig?: string,
     @Headers('stripe-signature') stripeSig?: string,
   ) {
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    // req.ip is trusted when app.set('trust proxy', true) is enabled in main.ts
+    const ip = req.ip || 
+               (req.headers['x-forwarded-for'] as string || '').split(',').pop()?.trim() || 
+               req.socket.remoteAddress || 
+               'unknown';
+               
     if (await this.isRateLimited(ip)) {
       this.logger.warn(`Webhook rate limit hit for IP ${ip} (slug: ${slug})`);
       throw new HttpException({

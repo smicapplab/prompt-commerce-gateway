@@ -3,12 +3,60 @@ import {
   Headers, UnauthorizedException, NotFoundException, ParseIntPipe,
   Inject, forwardRef
 } from '@nestjs/common';
+import { IsString, IsNotEmpty, IsOptional, IsIn, IsInt } from 'class-validator';
 import { ChatService } from './chat.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KeysService } from '../keys/keys.service';
 import { RegistryService } from '../registry/registry.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { ConversationService } from './conversation.service';
+
+class UpdateConversationDto {
+  @IsOptional()
+  @IsIn(['ai', 'human', 'closed'])
+  mode?: 'ai' | 'human' | 'closed';
+
+  @IsOptional()
+  @IsString()
+  assignedTo?: string;
+}
+
+class SendMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  body!: string;
+
+  @IsOptional()
+  @IsString()
+  senderName?: string;
+}
+
+class DeliverMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  body!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  senderName!: string;
+
+  @IsOptional()
+  @IsString()
+  buyerRef?: string;
+
+  @IsOptional()
+  @IsInt()
+  conversationId?: number;
+}
+
+class UpdateConversationModeDto {
+  @IsIn(['ai', 'human', 'closed'])
+  mode!: 'ai' | 'human' | 'closed';
+
+  @IsOptional()
+  @IsString()
+  assignedTo?: string;
+}
 
 @Controller('api')
 export class ChatController {
@@ -46,7 +94,7 @@ export class ChatController {
   @Patch('chat/conversations/:id')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { mode?: 'ai' | 'human' | 'closed'; assignedTo?: string }
+    @Body() body: UpdateConversationDto
   ) {
     if (body.mode) {
       return this.conversation.setMode(id, body.mode, body.assignedTo);
@@ -58,7 +106,7 @@ export class ChatController {
   @Post('chat/conversations/:id/messages')
   async sendMessage(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { body: string; senderName?: string }
+    @Body() body: SendMessageDto
   ) {
     return this.conversation.deliverFromAdmin(id, body.body, body.senderName || 'System Admin');
   }
@@ -69,7 +117,7 @@ export class ChatController {
   async deliver(
     @Param('slug') slug: string,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: { body: string; senderName: string; buyerRef?: string; conversationId?: number }
+    @Body() body: DeliverMessageDto
   ) {
     await this.validateKey(slug, platformKey);
 
@@ -100,7 +148,7 @@ export class ChatController {
     @Param('slug') slug: string,
     @Param('id', ParseIntPipe) id: number,
     @Headers('x-gateway-key') platformKey: string,
-    @Body() body: { mode: 'ai' | 'human' | 'closed'; assignedTo?: string }
+    @Body() body: UpdateConversationModeDto
   ) {
     await this.validateKey(slug, platformKey);
     const conv = await this.conversation.findById(id);

@@ -1,36 +1,107 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { 
+  IsString, 
+  IsNotEmpty, 
+  IsNumber, 
+  IsOptional, 
+  IsBoolean, 
+  IsArray, 
+  ValidateNested, 
+  IsInt 
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { PRISMA } from '../prisma/prisma.module';
 import type { PrismaClient } from '@prisma/client';
 import { parseSearchQuery } from './parse-search-query';
 
-export interface SyncCategoryDto {
-  id: number;
-  name: string;
-  parent_id: number | null;
+export class SyncCategoryDto {
+  @IsInt()
+  id!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsInt()
+  @IsOptional()
+  parent_id!: number | null;
 }
 
-export interface SyncProductDto {
-  id: number;
-  title: string;
-  description: string | null;
-  sku: string | null;
-  price: number | null;
-  stock_quantity: number;
-  category_id: number | null;
-  tags: string[];
-  images: string[];
-  active: boolean;
+export class SyncProductDto {
+  @IsInt()
+  id!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  title!: string;
+
+  @IsString()
+  @IsOptional()
+  description!: string | null;
+
+  @IsString()
+  @IsOptional()
+  sku!: string | null;
+
+  @IsNumber()
+  @IsOptional()
+  price!: number | null;
+
+  @IsInt()
+  stock_quantity!: number;
+
+  @IsInt()
+  @IsOptional()
+  category_id!: number | null;
+
+  @IsArray()
+  @IsString({ each: true })
+  tags!: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  images!: string[];
+
+  @IsBoolean()
+  active!: boolean;
 }
 
-export interface DeltaPayload {
-  upsert?: {
-    categories?: SyncCategoryDto[];
-    products?:   SyncProductDto[];
-  };
-  delete?: {
-    categoryIds?: number[];
-    productIds?:  number[];
-  };
+export class DeltaPayloadUpsert {
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => SyncCategoryDto)
+  categories?: SyncCategoryDto[];
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => SyncProductDto)
+  products?:   SyncProductDto[];
+}
+
+export class DeltaPayloadDelete {
+  @IsArray()
+  @IsOptional()
+  @IsInt({ each: true })
+  categoryIds?: number[];
+
+  @IsArray()
+  @IsOptional()
+  @IsInt({ each: true })
+  productIds?:  number[];
+}
+
+export class DeltaPayload {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DeltaPayloadUpsert)
+  upsert?: DeltaPayloadUpsert;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DeltaPayloadDelete)
+  delete?: DeltaPayloadDelete;
 }
 
 @Injectable()

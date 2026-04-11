@@ -6,50 +6,154 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaClient, Retailer } from '@prisma/client';
+import { 
+  IsString, 
+  IsNotEmpty, 
+  IsEmail, 
+  IsUrl, 
+  IsOptional, 
+  IsBoolean, 
+  IsInt 
+} from 'class-validator';
 import { PRISMA } from '../prisma/prisma.module';
 import { KeysService } from '../keys/keys.service';
 import { MailService } from '../mail/mail.service';
 import { isSsrfSafe } from '../utils/ssrf';
 
-export interface RegisterRetailerDto {
-  slug: string;
-  name: string;
-  contactEmail: string;
-  mcpServerUrl: string;
+export class RegisterRetailerDto {
+  @IsString()
+  @IsNotEmpty()
+  slug!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsEmail()
+  contactEmail!: string;
+
+  @IsUrl()
+  mcpServerUrl!: string;
+
+  @IsUrl()
+  @IsOptional()
   businessPermitUrl?: string;
 }
 
-export interface UpdateRetailerDto {
+export class UpdateRetailerDto {
+  @IsString()
+  @IsOptional()
   name?: string;
+
+  @IsEmail()
+  @IsOptional()
   contactEmail?: string;
+
+  @IsUrl()
+  @IsOptional()
   mcpServerUrl?: string;
+
+  @IsUrl()
+  @IsOptional()
   businessPermitUrl?: string;
+
+  @IsBoolean()
+  @IsOptional()
   verified?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
   active?: boolean;
+
   // AI assistant config for the Telegram bot
+  @IsString()
+  @IsOptional()
   aiProvider?: string | null;
+
+  @IsString()
+  @IsOptional()
   aiApiKey?: string | null;
+
+  @IsString()
+  @IsOptional()
   aiModel?: string | null;
+
+  @IsBoolean()
+  @IsOptional()
   aiEnabled?: boolean;
+
+  @IsString()
+  @IsOptional()
   aiSystemPrompt?: string | null;
+
+  @IsString()
+  @IsOptional()
   serperApiKey?: string | null;
+
   // Telegram and WhatsApp seller notifications
+  @IsString()
+  @IsOptional()
   telegramNotifyChatId?: string | null;
+
+  @IsBoolean()
+  @IsOptional()
   telegramEnabled?: boolean;
+
+  @IsString()
+  @IsOptional()
   whatsappNotifyNumber?: string | null;
+
+  @IsBoolean()
+  @IsOptional()
   whatsappEnabled?: boolean;
+
   // Payment gateway config
+  @IsString()
+  @IsOptional()
   paymentProvider?: string | null;
+
+  @IsString()
+  @IsOptional()
   paymentApiKey?: string | null;
+
+  @IsString()
+  @IsOptional()
   paymentPublicKey?: string | null;
+
+  @IsString()
+  @IsOptional()
   paymentWebhookSecret?: string | null;
+
+  @IsString()
+  @IsOptional()
   paymentInstructions?: string | null;
+
+  @IsString()
+  @IsOptional()
   paymentLinkTemplate?: string | null;
+
+  @IsString()
+  @IsOptional()
   assistedLabel?: string | null;
+
+  @IsBoolean()
+  @IsOptional()
   allowsPickup?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
   allowCod?: boolean;
+
+  @IsString()
+  @IsOptional()
   paymentMethods?: string;
+
+  @IsString()
+  @IsOptional()
   googleMapsEmbedKey?: string | null;
+
+  @IsString()
+  @IsOptional()
   googlePlacesBrowserKey?: string | null;
 }
 

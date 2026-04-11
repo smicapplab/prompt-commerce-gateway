@@ -123,7 +123,14 @@ export class PayMongoGateway implements PaymentGateway {
         .update(toSign)
         .digest('hex');
 
-      if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+      let valid = false;
+      try {
+        valid = crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+      } catch (e) {
+        valid = false;
+      }
+
+      if (!valid) {
         this.logger.warn('PayMongo webhook signature mismatch');
         return Promise.resolve(null);
       }
