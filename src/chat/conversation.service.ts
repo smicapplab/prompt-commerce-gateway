@@ -178,6 +178,13 @@ export class ConversationService {
     return msg;
   }
 
+  /** Delete all messages for a conversation */
+  async clearMessages(conversationId: number) {
+    return this.prisma.message.deleteMany({
+      where: { conversationId },
+    });
+  }
+
   /** Internal helper to call seller app with gateway platform key */
   private async mirrorToSeller(slug: string, method: string, path: string, body: any, retries = 2) {
     for (let i = 0; i <= retries; i++) {

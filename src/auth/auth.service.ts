@@ -26,9 +26,6 @@ export class AuthService {
 
   /** Seed the default admin on first boot if none exists. */
   async seedAdmin(): Promise<void> {
-    const count = await this.prisma.adminUser.count();
-    if (count > 0) return;
-
     const username = process.env.ADMIN_USERNAME ?? 'admin';
     const password = process.env.ADMIN_PASSWORD;
 
@@ -36,19 +33,23 @@ export class AuthService {
       throw new Error('CRITICAL: ADMIN_PASSWORD is not set or is set to an insecure default. Please set a strong ADMIN_PASSWORD in your .env file.');
     }
 
+    // Use upsert to avoid race conditions between concurrent instances.
+    // If the table is not empty, we could still skip, but upserting based on 
+    // username is safer than a separate count() check.
     try {
       const hash = await bcrypt.hash(password, 12);
-      await this.prisma.adminUser.create({
-        data: { username, passwordHash: hash }
+      await this.prisma.adminUser.upsert({
+        where: { username },
+        update: {}, // Do nothing if it already exists
+        create: {
+          username,
+          passwordHash: hash,
+        },
       });
-      console.log(`✔  Default gateway admin created (${username}).`);
+      console.log(`✔  Default gateway admin verified/created (${username}).`);
     } catch (error) {
-      // If another instance already created the admin, ignore the error
-      const countAfter = await this.prisma.adminUser.count();
-      if (countAfter === 0) {
-        throw error;
-      }
-      console.log('ℹ  Admin user already exists (likely created by another instance).');
+      console.error('❌ Failed to seed admin:', error);
+      throw error;
     }
   }
 }

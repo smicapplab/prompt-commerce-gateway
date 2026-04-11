@@ -404,14 +404,20 @@ export class CatalogService {
       await tx.cachedCategory.deleteMany({ where: { storeSlug: slug } });
 
       // Re-insert
-      for (const cat of categories) {
-        await tx.cachedCategory.create({
-          data: { storeSlug: slug, sellerId: cat.id, name: cat.name, parentId: cat.parent_id },
+      if (categories.length > 0) {
+        await tx.cachedCategory.createMany({
+          data: categories.map(cat => ({
+            storeSlug: slug,
+            sellerId: cat.id,
+            name: cat.name,
+            parentId: cat.parent_id,
+          })),
         });
       }
-      for (const p of products) {
-        await tx.cachedProduct.create({
-          data: {
+
+      if (products.length > 0) {
+        await tx.cachedProduct.createMany({
+          data: products.map(p => ({
             storeSlug: slug,
             sellerId: p.id,
             title: p.title,
@@ -423,7 +429,7 @@ export class CatalogService {
             tags: p.tags,
             images: p.images,
             active: p.active,
-          },
+          })),
         });
       }
 

@@ -173,53 +173,50 @@ export class OrdersService {
     if (status) where.orderStatus = status;
     if (deliveryType) where.deliveryType = deliveryType;
 
-    const [orders, total] = await Promise.all([
-      this.prisma.payment.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          orderNotes: { orderBy: { createdAt: 'desc' } },
-          orderFiles: { orderBy: { uploadedAt: 'desc' } },
-        }
-      }),
-      this.prisma.payment.count({ where }),
-    ]);
+    // Use a transaction to ensure stats are consistent with the returned data page
+    return this.prisma.$transaction(async (tx) => {
+      const [orders, total] = await Promise.all([
+        tx.payment.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            orderNotes: { orderBy: { createdAt: 'desc' } },
+            orderFiles: { orderBy: { uploadedAt: 'desc' } },
+          }
+        }),
+        tx.payment.count({ where }),
+      ]);
 
-    // Calculate some basic stats for the dashboard
-    const stats = {
-      byStatus: await this.prisma.payment.groupBy({
+      const byStatus = await tx.payment.groupBy({
         by: ['orderStatus'],
         _count: true,
         where: store ? { storeSlug: store } : {},
-      }),
-      avgFulfillmentHours: 0,
-    };
+      });
 
-    // Calculate avg fulfillment time for terminal orders
-    const terminalOrders = await this.prisma.payment.findMany({
-      where: {
-        ...(store ? { storeSlug: store } : {}),
-        orderStatus: { in: ['delivered', 'picked_up'] },
-        orderCreatedAt: { not: null },
-        terminalStatusAt: { not: null },
-      },
-      select: { orderCreatedAt: true, terminalStatusAt: true },
+      // PERF: Instead of fetching every terminal order into memory and calculating in JS,
+      // use SQL aggregation to calculate average fulfillment hours directly in the DB.
+      // EXTRACT(EPOCH FROM ...) returns seconds; divide by 3600 for hours.
+      const avgRes = await tx.$queryRaw<any[]>`
+        SELECT AVG(EXTRACT(EPOCH FROM (terminal_status_at - order_created_at))) / 3600 as "avgHours"
+        FROM payments
+        WHERE (${store}::text IS NULL OR store_slug = ${store})
+          AND order_status IN ('delivered', 'picked_up')
+          AND order_created_at IS NOT NULL
+          AND terminal_status_at IS NOT NULL
+      `;
+
+      const avgFulfillmentHours = avgRes[0]?.avgHours ? Number(avgRes[0].avgHours) : 0;
+
+      return {
+        orders,
+        total,
+        stats: {
+          byStatus,
+          avgFulfillmentHours,
+        },
+      };
     });
-
-    if (terminalOrders.length > 0) {
-      const totalHours = terminalOrders.reduce((sum, o) => {
-        const diff = o.terminalStatusAt!.getTime() - o.orderCreatedAt!.getTime();
-        return sum + (diff / (1000 * 60 * 60));
-      }, 0);
-      stats.avgFulfillmentHours = totalHours / terminalOrders.length;
-    }
-
-    return {
-      orders,
-      total,
-      stats,
-    };
   }
 }
