@@ -5,7 +5,7 @@ import https from 'https';
 /**
  * Returns true if the IPv4 address falls in a private / link-local / loopback range.
  */
-function isPrivateIp(ip: string): boolean {
+export function isPrivateIp(ip: string): boolean {
   const parts = ip.split('.').map(Number);
   if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) {
     return true; // treat malformed IPs as unsafe
@@ -106,7 +106,6 @@ export async function safeFetch(url: string, init?: RequestInit): Promise<Respon
 
   // Use global fetch with the custom dispatcher if available (Node 18+)
   // or fallback to a custom implementation.
-  // In many modern Node environments, we can pass a dispatcher.
   try {
     // @ts-ignore - 'dispatcher' is supported in undici-based fetch
     return await fetch(url, {

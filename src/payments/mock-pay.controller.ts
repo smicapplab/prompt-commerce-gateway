@@ -10,6 +10,7 @@ import {
   NotFoundException,
   UnauthorizedException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { PaymentService } from './payment.service';
@@ -19,7 +20,7 @@ import { Inject } from '@nestjs/common';
 import { PRISMA } from '../prisma/prisma.module';
 
 @Controller('mock-pay')
-export class MockPayController {
+export class MockPayController implements OnModuleInit {
   private readonly logger = new Logger(MockPayController.name);
   private readonly mockTokens = new Map<string, string>();
 
@@ -28,6 +29,15 @@ export class MockPayController {
     private readonly paymentService: PaymentService,
     private readonly telegramService: TelegramService,
   ) {}
+
+  onModuleInit() {
+    // Prune all mock tokens every 30 minutes to prevent memory leaks.
+    // They are only needed during a 10-minute session anyway.
+    setInterval(() => {
+      this.mockTokens.clear();
+      this.logger.log('Pruned mock payment tokens.');
+    }, 30 * 60 * 1000).unref();
+  }
 
   @Get()
   async showCheckout(@Query('ref') referenceId: string, @Res() res: Response) {

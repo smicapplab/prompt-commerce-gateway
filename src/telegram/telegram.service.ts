@@ -103,6 +103,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
   async onModuleInit(): Promise<void> {
     await this.initBot();
+
+    // Prune in-memory session maps every hour to prevent memory leaks.
+    // These maps hold non-critical transient state.
+    setInterval(() => {
+      this.checkoutSessions.clear();
+      this.searchQueries.clear();
+      this.lastStoreSlug.clear();
+      this.resultsState.clear();
+      this.logger.log('Pruned in-memory Telegram sessions.');
+    }, 60 * 60 * 1000).unref();
   }
 
   async onModuleDestroy(): Promise<void> {

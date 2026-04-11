@@ -108,6 +108,9 @@ export class WebhookController {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        // Prune expired entries to keep the table size under control
+        await tx.rateLimit.deleteMany({ where: { resetAt: { lt: now } } });
+
         const record = await tx.rateLimit.findUnique({ where: { key } });
 
         if (!record || now > record.resetAt) {
