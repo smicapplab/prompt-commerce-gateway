@@ -49,7 +49,7 @@ export class WhatsAppService implements OnModuleInit {
     private readonly catalog: CatalogService,
     @Inject(forwardRef(() => AiChatService)) private readonly aiChat: AiChatService,
     @Inject(forwardRef(() => CartService)) private readonly cartService: CartService,
-    private readonly conversationService: ConversationService,
+    @Inject(forwardRef(() => ConversationService)) private readonly conversationService: ConversationService,
     private readonly addressPicker: AddressPickerService,
     private readonly client: WhatsAppClient,
     private readonly sessionService: WhatsAppSessionService,
