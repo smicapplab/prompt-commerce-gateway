@@ -99,6 +99,12 @@ class SetGoogleConfigDto {
   googleMapsEmbedKey?: string | null;
 }
 
+class SetServerConfigDto {
+  @IsOptional()
+  @IsString()
+  publicUrl?: string | null;
+}
+
 // ─── Platform-key guard (shared by both endpoints) ───────────────────────────
 // The seller doesn't hold a gateway JWT — it authenticates with its platform
 // key (x-gateway-key header) so it can push data to its own store record.
@@ -348,6 +354,29 @@ export class CatalogController {
       hasPlacesKey: !!retailer.googlePlacesBrowserKey,
       hasMapsKey:   !!retailer.googleMapsEmbedKey,
     };
+  }
+
+  // ── PATCH /api/stores/:slug/server-config ─────────────────────────────
+  /**
+   * Pushed by the seller when the store owner updates their Server settings.
+   * Updates publicUrl.
+   *
+   * Auth: x-gateway-key header
+   * Body: { publicUrl }
+   */
+  @Patch(':slug/server-config')
+  async setServerConfig(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+    @Body() body: SetServerConfigDto,
+  ) {
+    const retailer = await this.validateKey(slug, platformKey);
+
+    await this.registry.update(retailer.id, {
+      publicUrl: body.publicUrl !== undefined ? body.publicUrl : retailer.publicUrl,
+    });
+
+    return { message: `Server config updated for "${slug}".` };
   }
 
   // ── GET /api/stores/:slug/sync/status ─────────────────────────────────

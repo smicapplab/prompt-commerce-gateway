@@ -83,11 +83,13 @@ export class StorefrontService {
     const [products, total, store] = await Promise.all([
       this.catalogService.getProducts(slug, { categoryId, search, sort, limit, offset }),
       this.catalogService.countProducts(slug, { categoryId, search }),
-      this.prisma.retailer.findUnique({ where: { slug }, select: { mcpServerUrl: true } }),
+      this.prisma.retailer.findUnique({ where: { slug }, select: { mcpServerUrl: true, publicUrl: true } }),
     ]);
 
     let baseUrl = '';
-    if (store?.mcpServerUrl) {
+    if (store?.publicUrl) {
+      baseUrl = store.publicUrl.replace(/\/$/, '');
+    } else if (store?.mcpServerUrl) {
        try { baseUrl = new URL(store.mcpServerUrl).origin; } catch {}
     }
 
@@ -111,9 +113,11 @@ export class StorefrontService {
       const product = await this.catalogService.getProduct(slug, sellerId);
       if (!product || !product.active) throw new NotFoundException('Product not found');
 
-      const store = await this.prisma.retailer.findUnique({ where: { slug }, select: { mcpServerUrl: true } });
+      const store = await this.prisma.retailer.findUnique({ where: { slug }, select: { mcpServerUrl: true, publicUrl: true } });
       let baseUrl = '';
-      if (store?.mcpServerUrl) {
+      if (store?.publicUrl) {
+          baseUrl = store.publicUrl.replace(/\/$/, '');
+      } else if (store?.mcpServerUrl) {
           try { baseUrl = new URL(store.mcpServerUrl).origin; } catch {}
       }
 
@@ -142,11 +146,15 @@ export class StorefrontService {
       const storeSlugs = [...new Set(products.map(p => p.storeSlug))];
       const stores = await this.prisma.retailer.findMany({
           where: { slug: { in: storeSlugs } },
-          select: { slug: true, mcpServerUrl: true }
+          select: { slug: true, mcpServerUrl: true, publicUrl: true }
       });
       const urlMap = new Map<string, string>();
       for (const s of stores) {
-          try { urlMap.set(s.slug, new URL(s.mcpServerUrl).origin); } catch { urlMap.set(s.slug, ''); }
+          if (s.publicUrl) {
+              urlMap.set(s.slug, s.publicUrl.replace(/\/$/, ''));
+          } else {
+              try { urlMap.set(s.slug, new URL(s.mcpServerUrl).origin); } catch { urlMap.set(s.slug, ''); }
+          }
       }
 
       return {

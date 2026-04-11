@@ -45,6 +45,16 @@ async function bootstrap(): Promise<void> {
   // ── Body parsing (Custom) ──────────────────────────────────────────────────
   const httpAdapter = app.getHttpAdapter();
   const expressApp = httpAdapter.getInstance();
+  
+  // ── Logging middleware ───────────────────────────────────────────────────────
+  expressApp.use((req: any, res: any, next: any) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      console.log(`${req.method} ${req.path} → ${res.statusCode} in ${duration}ms`);
+    });
+    next();
+  });
 
   // Apply JSON parsing selectively:
   //   /webhooks/*  → preserve raw body for signature verification (HMAC)

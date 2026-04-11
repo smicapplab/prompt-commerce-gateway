@@ -83,8 +83,9 @@ export class WhatsAppService implements OnModuleInit {
     // Verify Meta signature to reject spoofed/tampered webhooks
     const rawBody = rawBodyBuffer ? rawBodyBuffer.toString('utf8') : (typeof payload === 'string' ? payload : JSON.stringify(payload));
 
-    const isDev = process.env.NODE_ENV === 'development';
-    if (!isDev && (!signature || !this.client.verifySignature(rawBody, signature))) {
+    // Only skip verification if the client isn't configured with a secret yet (prevents bricking in local dev)
+    // but ALWAYS verify if a secret IS present.
+    if (this.client.isConfiguredWithSecret() && (!signature || !this.client.verifySignature(rawBody, signature))) {
       this.logger.warn('Missing or invalid webhook signature — request rejected.');
       return;
     }

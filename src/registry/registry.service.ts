@@ -155,6 +155,10 @@ export class UpdateRetailerDto {
   @IsString()
   @IsOptional()
   googlePlacesBrowserKey?: string | null;
+
+  @IsString()
+  @IsOptional()
+  publicUrl?: string | null;
 }
 
 @Injectable()

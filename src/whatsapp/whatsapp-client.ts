@@ -41,6 +41,10 @@ export class WhatsAppClient {
     return !!(this.phoneNumberId && this.accessToken);
   }
 
+  isConfiguredWithSecret(): boolean {
+    return !!(this.phoneNumberId && this.accessToken && this.webhookSecret);
+  }
+
   verifySignature(payload: string, signatureHeader?: string): boolean {
     if (!this.webhookSecret || !signatureHeader) return false;
     
@@ -76,6 +80,8 @@ export class WhatsAppClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),
+      // @ts-ignore - AbortSignal.timeout is a recent Node.js feature
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {

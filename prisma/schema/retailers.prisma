@@ -9,6 +9,7 @@ model Retailer {
   verified          Boolean  @default(false)
   active            Boolean  @default(true)
   allowsPickup      Boolean  @default(false) @map("allows_pickup")
+  publicUrl         String?  @map("public_url")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 

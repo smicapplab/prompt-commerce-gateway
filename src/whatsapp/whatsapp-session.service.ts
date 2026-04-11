@@ -34,9 +34,9 @@ export class WhatsAppSessionService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
-    // Touch only if close to expiry (within 5 mins) to reduce DB writes
-    const fiveMinutes = 5 * 60 * 1000;
-    if (session.expiresAt.getTime() - Date.now() < fiveMinutes) {
+    // Touch only if more than half of TTL has elapsed to reduce DB writes
+    const halfTtl = (this.TTL_MINUTES * 60 * 1000) / 2;
+    if (session.expiresAt.getTime() - Date.now() < halfTtl) {
       await this.setSession(userId, type, session.data as unknown as T);
     }
 
