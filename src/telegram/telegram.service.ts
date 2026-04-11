@@ -1181,8 +1181,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       kb.webApp('📍 Enter Delivery Address', webAppUrl).row();
     }
 
-    // Always allow free text as a fallback
-    state.step = 'freeAddress';
+    // BUG-1 FIX: Do not set freeAddress eagerly if we have buttons to show.
+    // The user should click "Enter Manually" or use the picker/saved addresses.
+    if (apiKey || addresses.length > 0) {
+      state.step = 'addressList';
+    } else {
+      state.step = 'freeAddress';
+    }
     this.checkoutSessions.set(userId, state);
 
     // Sort so default is on top
@@ -1205,8 +1210,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     let msg = '🏠 <b>Delivery Address</b>\n\n';
     
     if (apiKey) {
-      msg += 'Where should we deliver your order? Tap the button below to use our address picker.\n\n' +
-             '<i>Alternatively, just type your full address here and we\'ll use that.</i>';
+      msg += 'Where should we deliver your order? Tap the button below to use our address picker.';
     } else {
       msg += 'Please type your full delivery address:\n' +
              '<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>';
