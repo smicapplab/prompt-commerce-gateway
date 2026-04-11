@@ -5,7 +5,11 @@ import { RegistryService } from '../registry/registry.service';
 import { SettingsService } from '../settings/settings.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { AiChatService } from '../telegram/ai-chat.service';
-import { CartService } from '../telegram/cart.service';
+import { BrowsingService } from '../bot/browsing.service';
+import { CheckoutService } from '../bot/checkout.service';
+import { CheckoutState } from '../shared/types';
+import { buildAiChatFooter } from '../shared/ai-chat-shell';
+import { CartService } from '../cart/cart.service';
 import { AddressPickerService } from '../address-picker/address-picker.service';
 import { ConversationService } from '../chat/conversation.service';
 import { PaymentService } from '../payments/payment.service';
@@ -13,7 +17,6 @@ import { WhatsAppClient } from './whatsapp-client';
 import { WhatsAppSessionService } from './whatsapp-session.service';
 import { CatalogFormatter } from '../catalog/catalog-formatter';
 import { callRetailerTool } from '../mcp/retailer-client';
-import { buildAiChatFooter } from '../shared/ai-chat-shell';
 import {
   buildStoreListMenu,
   buildStoreMainMenu,
@@ -46,12 +49,14 @@ export class WhatsAppService implements OnModuleInit {
     private readonly catalog: CatalogService,
     @Inject(forwardRef(() => AiChatService)) private readonly aiChat: AiChatService,
     @Inject(forwardRef(() => CartService)) private readonly cartService: CartService,
-    @Inject(forwardRef(() => ConversationService)) private readonly conversationService: ConversationService,
-    @Inject(forwardRef(() => AddressPickerService)) private readonly addressPicker: AddressPickerService,
-    @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly conversationService: ConversationService,
+    private readonly addressPicker: AddressPickerService,
     private readonly client: WhatsAppClient,
     private readonly sessionService: WhatsAppSessionService,
     private readonly catalogFormatter: CatalogFormatter,
+    private readonly browsing: BrowsingService,
+    private readonly checkout: CheckoutService,
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
     @Optional() private readonly paymentService?: PaymentService,
   ) { }
 
@@ -135,29 +140,6 @@ export class WhatsAppService implements OnModuleInit {
     }
   }
 
-  private async resolveImageUrl(product: any, storeSlug: string): Promise<string | undefined> {
-    const images = Array.isArray(product.images) ? product.images : [];
-    let imageUrl = images[0] as string | undefined;
-
-    if (!imageUrl) return undefined;
-
-    // If it's already an absolute URL, return it
-    if (imageUrl.startsWith('http')) {
-      return imageUrl;
-    }
-
-    // Otherwise, build an absolute URL using the store's MCP server base URL
-    try {
-      const retailer = await this.registry.findBySlug(storeSlug);
-      if (!retailer || !retailer.mcpServerUrl) return undefined;
-      
-      const base = retailer.mcpServerUrl.replace(/\/sse\/?$/, '').replace(/\/$/, '');
-      return `${base}/uploads/${imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl}`;
-    } catch {
-      return undefined;
-    }
-  }
-
   /**
    * Sends product search results as individual WhatsApp card messages (image + title + price +
    * buttons), matching the Telegram card UX.  Follows up with a navigation/pagination footer.
@@ -172,7 +154,7 @@ export class WhatsAppService implements OnModuleInit {
 
     const cartUserId = `wa:${waId}`;
     for (const product of products) {
-      const imageUrl = await this.resolveImageUrl(product, storeSlug);
+      const imageUrl = await this.browsing.resolveImageUrl(product, storeSlug);
       const itemQty  = await this.cartService.getItemQty(cartUserId, storeSlug, product.sellerId ?? product.id).catch(() => 0);
       const card = buildProductCard(product, storeSlug, itemQty, {
         imageUrl,
@@ -296,86 +278,26 @@ export class WhatsAppService implements OnModuleInit {
 
     if (session?.step === 'confirm' && text.toLowerCase().includes('place order')) {
       const slug = session.storeSlug;
-      const items = await this.cartService.get(cartUserId, slug);
-      const retailer = await this.registry.findBySlug(slug);
-
-      if (!items.length) {
-        return this.client.sendInteractive(waId, {
-          type: 'button',
-          body: { text: 'Your cart is empty.' },
-          action: {
-            buttons: [{ type: 'reply', reply: { id: `${WA_ACTION.STORE_MENU}:${slug}`, title: '🏠 Main Menu' } }]
-          }
-        });
-      }
-      if (!retailer) {
-        return this.client.sendInteractive(waId, {
-          type: 'button',
-          body: { text: 'Store error.' },
-          action: {
-            buttons: [{ type: 'reply', reply: { id: 'start', title: '⬅️ Change Store' } }]
-          }
-        });
+      const { allowed, waitSec } = await this.checkout.checkRateLimit(waId, 'whatsapp');
+      if (!allowed) {
+        return this.client.sendText(waId, `⏳ Please wait ${waitSec}s before placing another order.`);
       }
 
-      const user = await this.prisma.whatsAppUser.findUnique({ where: { id: waId } });
+      await this.client.sendText(waId, '⏳ Processing your order... Please wait.');
 
       try {
-        // 1. Create order on Seller Server via MCP
-        const mcpRes = await callRetailerTool(
-          {
-            slug: retailer.slug,
-            mcpServerUrl: retailer.mcpServerUrl,
-            platformKey: retailer.platformKey?.key || ''
-          },
-          'create_order',
-          {
-            items: items.map(i => ({ product_id: i.productId, quantity: i.quantity })),
-            buyer_ref: waId,
-            buyer_name: session.name,
-            buyer_email: user?.savedEmail || '',
-            delivery_address: session.address,
-            channel: 'whatsapp',
-            notes: '', // No combined notes anymore, we have structured fields
-            lat: session.lat,
-            lng: session.lng,
-            confirm: true,
-            delivery_type: session.deliveryType || 'delivery',
-            payment_provider: session.paymentMethod
-          }
-        ) as { content: any[] };
-
-        const orderJson = JSON.parse(mcpRes.content.find(c => c.type === 'text' && c.text.includes('order_id'))?.text || '{}');
-        const orderId = orderJson.order_id;
-
-        if (!orderId) throw new Error('Order creation failed on seller server.');
-
-        // 2. Initiate Payment on Gateway
-        const total = await this.cartService.total(cartUserId, slug);
-        const baseUrl = await this.settings.get('gateway_public_url') || 'http://localhost:3002';
-
-        const payment = await this.paymentService?.initiatePayment({
-          orderId,
-          storeSlug: slug,
-          buyerRef: waId,
-          amount: total,
-          description: `Order #${orderId} at ${retailer.name}`,
-          baseUrl,
-          providerOverride: session.paymentMethod
-        });
-
-        // 3. Send final confirmation
-        await this.cartService.clear(cartUserId, slug);
-        await this.sessionService.deleteSession(waId, 'main'); 
+        const { orderId, total, retailer, payment, items } = await this.checkout.placeOrder(waId, session, 'whatsapp');
+        
+        // Cleanup session only on SUCCESS
+        await this.sessionService.deleteSession(waId, 'main');
 
         let finalMsg = `✅ *Order #${orderId} Placed!*\n\nThank you ${session.name}, your order has been received and is being processed by *${retailer.name}*.\n\n`;
 
         if (payment?.paymentUrl) {
-          if (payment.paymentUrl.includes('localhost') || payment.paymentUrl.includes('127.0.0.1')) {
-            finalMsg += `💳 *Complete Payment:*\n${payment.paymentUrl}`;
-            // For localhost, we have to use sendText because WhatsApp blocks localhost buttons
+          const isLocalUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(payment.paymentUrl);
+          if (isLocalUrl) {
+            finalMsg += `💳 *Complete Payment (Local Dev):*\n${payment.paymentUrl}`;
             await this.client.sendText(waId, finalMsg);
-            // But we can send an interactive menu right after
             await this.client.sendInteractive(waId, {
               type: 'button',
               body: { text: 'What would you like to do next?' },
@@ -416,7 +338,7 @@ export class WhatsAppService implements OnModuleInit {
             `*Items:*\n${itemLines}\n\n` +
             `*Total:* ₱${total.toLocaleString()}\n\n` +
             `*Address:*\n${session.address}\n\n` +
-            `*Payment:* ${session.paymentMethod.toUpperCase()}\n\n` +
+            `*Payment:* ${(session.paymentMethod || payment?.provider || 'cod').toUpperCase()}\n\n` +
             `_Check Admin Panel for details._`;
 
           this.client.sendText(retailer.whatsappNotifyNumber, notifyMsg).catch(err => {
@@ -779,7 +701,7 @@ export class WhatsAppService implements OnModuleInit {
       const retailer = await this.registry.findBySlug(targetSlug);
       const mcpUrl = retailer?.mcpServerUrl;
       const detailText = this.catalogFormatter.productDetail(product, 'whatsapp', mcpUrl);
-      const imageUrl = await this.resolveImageUrl(product, targetSlug);
+      const imageUrl = await this.browsing.resolveImageUrl(product, targetSlug);
 
       if (imageUrl) {
         try {
@@ -1000,52 +922,24 @@ export class WhatsAppService implements OnModuleInit {
   }
 
   private async saveAndApplyAddress(waId: string, session: any, label: string) {
-    const province = session.province || '';
-    const city     = session.city     || '';
-    const barangay = session.barangay || '';
+    const updatedState = await this.checkout.saveAddress({
+      userId: waId,
+      platform: 'whatsapp',
+      state: session,
+      label
+    });
 
-    // Don't save if label is 'skip'
-    if (label && label !== 'skip') {
-      const addressCount = await this.prisma.whatsAppAddress.count({
-        where: { userId: waId }
-      });
-
-      await this.prisma.whatsAppAddress.create({
-        data: {
-          userId: waId,
-          label,
-          streetLine: session.streetLine,
-          barangay,
-          city,
-          province,
-          postalCode: session.postalCode ?? null,
-          lat: session.lat ?? null,
-          lng: session.lng ?? null,
-          isDefault: addressCount === 0
-        }
-      });
-    }
-
-    const addressStr = session.address || 
-      [session.streetLine, barangay, city, province, session.postalCode].filter(Boolean).join(', ');
-    
-    const retailer = await this.registry.findBySlug(session.storeSlug);
+    const retailer = await this.registry.findBySlug(updatedState.storeSlug);
 
     if (retailer?.allowsPickup) {
-      await this.sessionService.setSession(waId, 'main', {
-        ...session,
-        address: addressStr,
-        step: 'delivery'
-      });
-      return this.client.sendInteractive(waId, buildDeliveryMenu(session.storeSlug, true));
+      updatedState.step = 'delivery';
+      await this.sessionService.setSession(waId, 'main', updatedState);
+      return this.client.sendInteractive(waId, buildDeliveryMenu(updatedState.storeSlug, true));
     } else {
-      await this.sessionService.setSession(waId, 'main', {
-        ...session,
-        address: addressStr,
-        deliveryType: 'delivery',
-        step: 'payment'
-      });
-      return this.showPaymentMenu(waId, session.storeSlug);
+      updatedState.step = 'payment';
+      updatedState.deliveryType = 'delivery';
+      await this.sessionService.setSession(waId, 'main', updatedState);
+      return this.showPaymentMenu(waId, updatedState.storeSlug);
     }
   }
 
@@ -1072,37 +966,26 @@ export class WhatsAppService implements OnModuleInit {
   }
 
   async handlePickerAddress(waId: string, storeSlug: string, address: any) {
-    const session = await this.sessionService.getSession<any>(waId, 'main');
+    const session = await this.sessionService.getSession<CheckoutState>(waId, 'main');
     if (!session) return;
 
-    // Sanitize and cap input lengths
-    const clean = {
-      streetLine:       String(address.streetLine  || '').slice(0, 200),
-      barangay:         String(address.barangay    || '').slice(0, 100),
-      city:             String(address.city        || '').slice(0, 100),
-      province:         String(address.province    || '').slice(0, 100),
-      postalCode:       String(address.postalCode  || '').slice(0, 20),
-      formattedAddress: String(address.formattedAddress || '').slice(0, 300),
-      lat:  typeof address.lat === 'number' ? address.lat : null,
-      lng:  typeof address.lng === 'number' ? address.lng : null,
-    };
-
-    // Update session with sanitized address details
-    const updatedSession = {
+    // Sanitize and update session with sanitized address details
+    const updatedSession: CheckoutState = {
       ...session,
-      streetLine: clean.streetLine,
-      barangay: clean.barangay,
-      city: clean.city,
-      province: clean.province,
-      postalCode: clean.postalCode,
-      address: clean.formattedAddress,
-      lat: clean.lat,
-      lng: clean.lng,
-      step: 'labelType', // Skip to label selection
+      streetLine: String(address.streetLine  || '').slice(0, 200),
+      barangay:   String(address.barangay    || '').slice(0, 100),
+      city:       String(address.city        || '').slice(0, 100),
+      province:   String(address.province    || '').slice(0, 100),
+      postalCode: String(address.postalCode  || '').slice(0, 20),
+      address:    String(address.formattedAddress || '').slice(0, 300),
+      lat:        typeof address.lat === 'number' ? address.lat : undefined,
+      lng:        typeof address.lng === 'number' ? address.lng : undefined,
+      step:       'labelType', // Skip to label selection
     };
 
     await this.sessionService.setSession(waId, 'main', updatedSession);
 
-    await this.client.sendText(waId, `✅ Got your address:\n*${clean.formattedAddress}*`);
+    await this.client.sendText(waId, `✅ Got your address:\n*${updatedSession.address}*`);
     return this.client.sendInteractive(waId, buildLabelMenu(storeSlug));
-  }}
+  }
+}

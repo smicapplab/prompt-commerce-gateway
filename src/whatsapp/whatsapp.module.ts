@@ -7,6 +7,8 @@ import { TelegramModule } from '../telegram/telegram.module'; // for CartService
 import { ChatModule } from '../chat/chat.module';
 import { PaymentModule } from '../payments/payment.module';
 import { AddressPickerModule } from '../address-picker/address-picker.module';
+import { CartModule } from '../cart/cart.module';
+import { BotModule } from '../bot/bot.module';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppClient } from './whatsapp-client';
@@ -22,6 +24,8 @@ import { WhatsAppSessionService } from './whatsapp-session.service';
     forwardRef(() => TelegramModule),
     forwardRef(() => ChatModule),
     PaymentModule,
+    CartModule,
+    BotModule,
   ],
   controllers: [WhatsAppController],
   providers: [

@@ -8,10 +8,13 @@ import { SettingsService } from '../settings/settings.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { callRetailerTool } from '../mcp/retailer-client';
 import { AiChatService, type StoreAiConfig, type ChatResult } from './ai-chat.service';
-import { TelegramSessionService } from './telegram-session.service';
-import { CartService } from './cart.service';
 import { ConversationService } from '../chat/conversation.service';
 import { PaymentService } from '../payments/payment.service';
+import { BrowsingService } from '../bot/browsing.service';
+import { CheckoutService } from '../bot/checkout.service';
+import { CheckoutState } from '../shared/types';
+import { CartService } from '../cart/cart.service';
+import { TelegramSessionService } from './telegram-session.service';
 import { CatalogFormatter } from '../catalog/catalog-formatter';
 import { buildAiChatFooter } from '../shared/ai-chat-shell';
 import { AddressPickerService } from '../address-picker/address-picker.service';
@@ -24,27 +27,7 @@ import { esc, price, productDetail, cartSummary, orderConfirmation,
 
 const PAGE_SIZE = 5;
 
-// ─── Checkout session state ───────────────────────────────────────────────────
-interface CheckoutState {
-  storeSlug:     string;
-  step:          'name' | 'email' | 'addressList' | 'addressPicker' | 'freeAddress' | 'labelType' | 'delivery' | 'payment' | 'confirm';
-  name?:         string;
-  email?:        string;
-  
-  // New address flow state
-  province?:     string;
-  city?:         string;
-  barangay?:     string;
-  streetLine?:   string;
-  postalCode?:   string;
-  addressId?:    number;
-  lat?:          number;
-  lng?:          number;
-
-  address?:      string;
-  deliveryType?: 'delivery' | 'pickup';
-  paymentMethod?: string;  // e.g. 'cod', 'mock', 'assisted', 'paymongo', 'stripe'
-}
+// CheckoutState is now imported from ../shared/types
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
@@ -69,6 +52,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly conversationService: ConversationService,
     private readonly catalogFormatter: CatalogFormatter,
     private readonly addressPicker: AddressPickerService,
+    private readonly browsing: BrowsingService,
+    private readonly checkout: CheckoutService,
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     @Optional() private readonly paymentService?: PaymentService,
   ) {}
@@ -825,7 +810,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         .text(addLabel, CB.qty(p.storeSlug, p.sellerId))
         .text('📋 Details', CB.prod(p.storeSlug, p.sellerId));
 
-      const imageUrl = await this.resolveImageUrl(p as any, p.storeSlug);
+      const imageUrl = await this.browsing.resolveImageUrl(p as any, p.storeSlug);
 
       let sentMsg;
       if (imageUrl?.startsWith('http')) {
@@ -1301,34 +1286,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async saveAndApplyAddress(ctx: any, userId: string, state: CheckoutState, label: string, isEdit = false): Promise<void> {
-    const province = state.province || '';
-    const city     = state.city     || '';
-    const barangay = state.barangay || '';
+    state = await this.checkout.saveAddress({ userId, platform: 'telegram', state, label });
 
-    // Save to DB if labeling (don't save if label is 'skip')
-    if (label && label !== 'skip') {
-      const addressCount = await this.prisma.telegramAddress.count({
-        where: { userId }
-      });
-
-      const addressRecord = await this.prisma.telegramAddress.create({
-        data: {
-          userId: userId,
-          label: label.slice(0, 50),
-          streetLine: state.streetLine!,
-          barangay,
-          city,
-          province,
-          postalCode: state.postalCode ?? null,
-          lat: state.lat ?? null,
-          lng: state.lng ?? null,
-          isDefault: addressCount === 0
-        }
-      });
-      state.addressId = addressRecord.id;
-    }
-
-    state.address = [state.streetLine, barangay, city, province, state.postalCode].filter(Boolean).join(', ');
     const retailer = await this.getRetailer(state.storeSlug);
     if (retailer.allowsPickup) {
       state.step = 'delivery';
@@ -1352,23 +1311,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async showOrderSummary(ctx: any, userId: string, storeSlug: string, state: CheckoutState, isEdit = false, retailer?: any): Promise<void> {
-    // ── Refresh prices before confirmation ────────────────────────────────
-    const { changed, oldTotal, newTotal } = await this.cartService.validateCartPrices(userId, storeSlug);
-    if (changed) {
+    const summary = await this.checkout.getOrderSummary(userId, storeSlug, 'telegram');
+    if (summary.priceChanged) {
       const msg = `⚠️ <b>Note:</b> Some items in your cart have changed in price or availability. ` +
-                  `Your order total has been updated from ${price(oldTotal)} to <b>${price(newTotal)}</b>.`;
-      if (isEdit) await ctx.reply(msg, { parse_mode: 'HTML' });
-      else await ctx.reply(msg, { parse_mode: 'HTML' });
+                  `Your order total has been updated from ${price(summary.oldTotal)} to <b>${price(summary.newTotal)}</b>.`;
+      await ctx.reply(msg, { parse_mode: 'HTML' });
     }
 
-    const items = await this.cartService.get(userId, storeSlug);
-    if (items.length === 0) {
+    if (summary.items.length === 0) {
       await ctx.reply('Your cart is now empty. Please add items before checking out.');
       this.checkoutSessions.delete(userId);
       return;
     }
-    const total = await this.cartService.total(userId, storeSlug);
-    const summary = items.map(i => `• ${i.title} × ${i.quantity} — ${price(i.price * i.quantity)}`).join('\n');
 
     const confirmKb = new InlineKeyboard()
       .text('✅ Confirm Order', `confirm:${storeSlug}`)
@@ -1378,11 +1332,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const deliveryText = state.deliveryType === 'pickup' ? 'Store Pickup' : 'Home Delivery';
     
     if (!retailer) {
-      retailer = await this.getRetailer(storeSlug);
+        retailer = await this.getRetailer(storeSlug);
     }
     const paymentText = this.getPaymentLabel(state.paymentMethod || 'cod', retailer);
+    const itemsText = summary.items.map(i => `• ${i.title} × ${i.quantity} — ${price(i.price * i.quantity)}`).join('\n');
 
-    const text = `<b>Order Summary</b>\n\n${summary}\n\n<b>Total: ${price(total)}</b>\n\n` +
+    const text = `<b>Order Summary</b>\n\n${itemsText}\n\n<b>Total: ${price(summary.newTotal)}</b>\n\n` +
       `👤 Name: ${esc(state.name)}\n📧 Email: ${esc(state.email)}\n🏠 Address: ${esc(state.address)}\n` +
       `${deliveryIcon} Delivery: ${deliveryText}\n` +
       `💳 Payment: ${paymentText}\n\n` +
@@ -1404,235 +1359,94 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // ── Rate limiting: one order per 30 seconds per user (atomic) ──────────
-    const thirtySecsAgo = new Date(Date.now() - 30_000);
-    const updated = await this.prisma.telegramUser.updateMany({
-      where: {
-        id: userId,
-        OR: [
-          { lastOrderAt: null },
-          { lastOrderAt: { lt: thirtySecsAgo } }
-        ]
-      },
-      data: { lastOrderAt: new Date() }
-    });
-
-    if (updated.count === 0) {
-      const user = await this.prisma.telegramUser.findUnique({ where: { id: userId } });
-      if (user) {
-        const lastAt = user.lastOrderAt?.getTime() || 0;
-        const waitSec = Math.ceil((30_000 - (Date.now() - lastAt)) / 1000);
-        await ctx.answerCallbackQuery(`⏳ Please wait ${waitSec}s before placing another order.`);
-        return;
-      } else {
-        // First order for this user — handle race condition (Issue #1)
-        try {
-          await this.prisma.telegramUser.create({
-            data: { id: userId, lastOrderAt: new Date() }
-          });
-        } catch (e: any) {
-          // If another request created it simultaneously, treat it as a rate limit hit
-          if (e.code === 'P2002') {
-             await ctx.answerCallbackQuery(`⏳ Please wait a moment before placing another order.`);
-             return;
-          }
-          throw e;
-        }
-      }
-    }
-
-    const items = await this.cartService.get(userId, slug);
-    if (items.length === 0) {
-      await ctx.answerCallbackQuery('⚠️ Your cart is empty.');
+    const { allowed, waitSec } = await this.checkout.checkRateLimit(userId, 'telegram');
+    if (!allowed) {
+      await ctx.answerCallbackQuery(`⏳ Please wait ${waitSec}s before placing another order.`);
       return;
     }
-    const total = await this.cartService.total(userId, slug);
 
     try {
-      const retailer = await this.getRetailer(slug);
-      // M7: Escape buyer data before passing to MCP to prevent XSS in seller admin
-      const buyerName = esc(state.name);
-      const buyerEmail = esc(state.email);
-      const deliveryAddress = esc(state.address);
-      const orderItems = items.map(i => ({ product_id: i.productId, quantity: i.quantity }));
+      await ctx.editMessageText('⏳ Processing your order... Please wait.', { parse_mode: 'HTML' });
+    } catch (e) { /* ignore */ }
 
-      // BUG-2 FIX: Generate idempotency key based on items + user + timestamp (rounded to minute for safety)
-      // or just a unique hash of the intended order content.
-      const idempotencySource = JSON.stringify({ userId, slug, items: orderItems, total });
-      const idempotencyKey = crypto.createHash('sha256').update(idempotencySource).digest('hex');
-
-      try {
-        await ctx.editMessageText('⏳ Processing your order... Please wait.', { parse_mode: 'HTML' });
-      } catch (e: any) {
-        if (!e.message?.includes('message is not modified')) {
-          this.logger.warn(`Could not set processing message: ${e}`);
-        }
-      }
-
-      // ── Step 1: Create the order in the seller's store ──────────────────────
-      const result = await callRetailerTool(retailer, 'create_order', {
-        items: orderItems,
-        buyer_ref: userId,
-        buyer_name: buyerName,
-        buyer_email: buyerEmail,
-        delivery_address: deliveryAddress,
-        channel: 'telegram',
-        notes: '', 
-        lat: state.lat,
-        lng: state.lng,
-        confirm: true,
-        delivery_type: state.deliveryType || 'delivery',
-        payment_provider: state.paymentMethod || retailer.paymentProvider || (await this.settings.get('default_payment_provider')) || 'cod',
-        payment_instructions: retailer.paymentInstructions || (await this.settings.get('default_payment_instructions')) || '',
-        idempotency_key: idempotencyKey, // Pass to seller
-      }) as any;
-
-      const content = result?.content || [];
-      let orderId = 0;
-
-      // 1. Try to parse from JSON content (reliable)
-      for (const item of content) {
-        if (item.type === 'text' && item.text?.startsWith('{')) {
-          try {
-            const parsed = JSON.parse(item.text);
-            if (parsed.order_id) {
-              orderId = parsed.order_id;
-              break;
-            }
-          } catch (e) { /* not JSON */ }
-        }
-      }
-
-      // 2. Fallback to regex (fragile)
-      if (!orderId) {
-        const resultText: string = result?.content?.[0]?.text ?? '';
-        const match = resultText.match(/Order #(\d+)/);
-        if (match) orderId = parseInt(match[1]);
-      }
-
-      if (!orderId) {
-        throw new Error(`Failed to parse order ID from seller response: ${JSON.stringify(result)}`);
-      }
-
-      // BUG-2 FIX: Wrap local gateway operations in a transaction
-      // This ensures cart clearing and Payment record creation are atomic.
-      await this.prisma.$transaction(async (tx) => {
-        await this.cartService.clear(userId, slug);
-        
-        // Update last order timestamp and save profile details
-        const nameParts = state.name?.split(' ') || [];
-        const fName = nameParts[0] || '';
-        const lName = nameParts.slice(1).join(' ') || '';
-        
-        await tx.telegramUser.update({
-          where: { id: userId },
-          data: { 
-            lastOrderAt: new Date(),
-            savedFirstName: fName,
-            savedLastName: lName,
-            savedEmail: state.email,
-          },
-        });
-
-        // Step 2: Initiate payment if PaymentService is wired in
-        if (this.paymentService && orderId) {
-          const baseUrl = process.env.GATEWAY_PUBLIC_URL?.replace(/\/$/, '')
-            ?? `http://localhost:${process.env.PORT ?? process.env.GATEWAY_PORT ?? 3002}`;
-
-          const payment = await this.paymentService.initiatePayment({
-            orderId,
-            storeSlug:   slug,
-            buyerRef:    userId,
-            amount:      total,
-            description: `Order #${orderId} — ${slug}`,
-            buyerEmail:  state.email,
-            baseUrl,
-            providerOverride: state.paymentMethod || undefined,
-          });
-
-          // Send confirmation message to user
-          if (payment.status === 'paid') {
-            await ctx.editMessageText(
-              orderConfirmation(orderId, items, total),
-              { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
-            );
-          } else if (payment.provider === 'cod') {
-            await ctx.editMessageText(
-              `✅ <b>Order #${orderId} placed!</b>\n\n` +
-              `Payment Method: <b>Cash on Delivery</b>\n\n` +
-              `Please prepare <b>${price(total)}</b> in cash upon delivery/pickup.`,
-              { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
-            );
-          } else if (payment.provider === 'assisted') {
-            const label = retailer.assistedLabel || (await this.settings.get('default_payment_label')) || 'Assisted Payment';
-            const payKb = new InlineKeyboard();
-            if (payment.paymentUrl) {
-              payKb.url(`💳 ${label}`, payment.paymentUrl).row();
-            }
-            payKb.text('🏠 Back to store', `bk:${slug}`);
-            const instructions = retailer.paymentInstructions || (await this.settings.get('default_payment_instructions')) || '';
-
-            await ctx.editMessageText(
-              `✅ <b>Order #${orderId} placed!</b>\n\n` +
-              (instructions ? `<b>Payment Instructions:</b>\n${esc(instructions)}\n\n` : '') +
-              `<b>Total: ${price(total)}</b>\n\n` +
-              `<i>Once you've made the payment, the store will verify and update your order status.</i>`,
-              { parse_mode: 'HTML', reply_markup: payKb },
-            );
-          } else if (payment.paymentUrl) {
-            const isLocalUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(payment.paymentUrl);
-            if (isLocalUrl) {
-              await this.safeEditText(
-                ctx,
-                `✅ <b>Order #${orderId} placed!</b>\n\n` +
-                `🧪 <b>Mock payment (local dev):</b>\n` +
-                `Open this link in your browser to complete the test payment:\n` +
-                `<code>${payment.paymentUrl}</code>`,
-                { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
-              );
-            } else {
-              const payKb = new InlineKeyboard()
-                .url('💳 Pay Now', payment.paymentUrl)
-                .row()
-                .text('🏠 Back to store', `bk:${slug}`);
-
-              await this.safeEditText(
-                ctx,
-                `✅ <b>Order #${orderId} placed!</b>\n\n` +
-                `Please complete your payment of <b>${price(total)}</b> using the button below.\n\n` +
-                `<i>You'll receive a confirmation message once payment is verified.</i>`,
-                { parse_mode: 'HTML', reply_markup: payKb },
-              );
-            }
-          } else {
-            await ctx.editMessageText(
-              orderConfirmation(orderId, items, total),
-              { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
-            );
-          }
-        } else {
-          // No payment service — just confirm
-          await ctx.editMessageText(
-            orderConfirmation(orderId, items, total),
-            { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
-          );
-        }
-      });
-
+    try {
+      const { orderId, total, retailer, payment, items } = await this.checkout.placeOrder(userId, state, 'telegram');
+      
+      // Cleanup session only on SUCCESS
       this.checkoutSessions.delete(userId);
 
-      // ── Notify seller of new order ────────────────────────────────────────
+      if (payment?.status === 'paid') {
+        await ctx.editMessageText(
+          orderConfirmation(orderId, items, total),
+          { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+        );
+      } else if (payment?.provider === 'cod') {
+        await ctx.editMessageText(
+          `✅ <b>Order #${orderId} placed!</b>\n\n` +
+          `Payment Method: <b>Cash on Delivery</b>\n\n` +
+          `Please prepare <b>${price(total)}</b> in cash upon delivery/pickup.`,
+          { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+        );
+      } else if (payment?.provider === 'assisted') {
+        const label = retailer.assistedLabel || (await this.settings.get('default_payment_label')) || 'Assisted Payment';
+        const payKb = new InlineKeyboard();
+        if (payment.paymentUrl) {
+          payKb.url(`💳 ${label}`, payment.paymentUrl).row();
+        }
+        payKb.text('🏠 Back to store', `bk:${slug}`);
+        const instructions = retailer.paymentInstructions || (await this.settings.get('default_payment_instructions')) || '';
+
+        await ctx.editMessageText(
+          `✅ <b>Order #${orderId} placed!</b>\n\n` +
+          (instructions ? `<b>Payment Instructions:</b>\n${esc(instructions)}\n\n` : '') +
+          `<b>Total: ${price(total)}</b>\n\n` +
+          `<i>Once you've made the payment, the store will verify and update your order status.</i>`,
+          { parse_mode: 'HTML', reply_markup: payKb },
+        );
+      } else if (payment?.paymentUrl) {
+        const isLocalUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(payment.paymentUrl);
+        if (isLocalUrl) {
+          await this.safeEditText(
+            ctx,
+            `✅ <b>Order #${orderId} placed!</b>\n\n` +
+            `🧪 <b>Mock payment (local dev):</b>\n` +
+            `Open this link in your browser to complete the test payment:\n` +
+            `<code>${payment.paymentUrl}</code>`,
+            { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+          );
+        } else {
+          const payKb = new InlineKeyboard()
+            .url('💳 Pay Now', payment.paymentUrl)
+            .row()
+            .text('🏠 Back to store', `bk:${slug}`);
+
+          await this.safeEditText(
+            ctx,
+            `✅ <b>Order #${orderId} placed!</b>\n\n` +
+            `Please complete your payment of <b>${price(total)}</b> using the button below.\n\n` +
+            `<i>Once paid, your order will be processed automatically.</i>`,
+            { parse_mode: 'HTML', reply_markup: payKb },
+          );
+        }
+      } else {
+        await ctx.editMessageText(
+          `✅ <b>Order #${orderId} placed!</b>\n\n<b>Total: ${price(total)}</b>\n\n📦 Status: <b>Pending Delivery</b>`,
+          { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
+        );
+      }
+
+      // 4. Notify seller if configured
       if (retailer.telegramNotifyChatId && this.bot) {
         try {
           const itemLines = items.map(i => `• ${i.title} × ${i.quantity} = ${price(i.price * i.quantity)}`).join('\n');
-          const notifyMsg =
+          const notifyMsg = 
             `🔔 <b>New Order #${orderId}</b>\n\n` +
             `<b>Store:</b> ${esc(retailer.name)}\n` +
             `<b>Customer:</b> ${esc(state.name || 'Telegram Buyer')} (${userId})\n\n` +
             `<b>Items:</b>\n${itemLines}\n\n` +
             `<b>Total: ${price(total)}</b>\n\n` +
             `<b>Address:</b>\n${esc(state.address)}\n\n` +
-            `<b>Payment:</b> ${esc(state.paymentMethod?.toUpperCase() || 'N/A')}\n\n` +
+            `<b>Payment:</b> ${(state.paymentMethod || payment?.provider || 'cod').toUpperCase()}\n\n` +
             `<i>Check Admin Panel for details.</i>`;
 
           await this.bot.api.sendMessage(retailer.telegramNotifyChatId, notifyMsg, { parse_mode: 'HTML' });
@@ -1642,21 +1456,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
 
     } catch (err: any) {
-      this.logger.error(`Order creation failed: ${err}`);
-      this.checkoutSessions.delete(userId);
-      try {
-        await ctx.editMessageText(
-          '❌ Sorry, there was an error placing your order. Please try again.',
-          { reply_markup: backKeyboard(slug) },
-        );
-      } catch (e: any) {
-        if (!e.message?.includes('message is not modified')) {
-          this.logger.error(`Failed to show order error: ${e}`);
-        }
-      }
+      this.logger.error(`Order execution failed: ${err.message}`);
+      await ctx.answerCallbackQuery(`❌ Order failed: ${err.message}`);
     }
   }
-
   // ─── Notify user of order status change (called by OrdersService sync) ───────
   async notifyOrderStatusChange(params: {
     chatId: string;
@@ -1910,26 +1713,4 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async resolveImageUrl(product: any, storeSlug: string): Promise<string | undefined> {
-    const images = Array.isArray(product.images) ? product.images : [];
-    let imageUrl = images[0] as string | undefined;
-
-    if (!imageUrl) return undefined;
-
-    // If it's already an absolute URL, return it
-    if (imageUrl.startsWith('http')) {
-      return imageUrl;
-    }
-
-    // Otherwise, build an absolute URL using the store's MCP server base URL
-    try {
-      const retailer = await this.registry.findBySlug(storeSlug);
-      if (!retailer || !retailer.mcpServerUrl) return undefined;
-
-      const base = retailer.mcpServerUrl.replace(/\/sse\/?$/, '').replace(/\/$/, '');
-      return `${base}/uploads/${imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl}`;
-    } catch {
-      return undefined;
-    }
-  }
 }

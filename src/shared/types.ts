@@ -197,6 +197,29 @@ export interface Product {
   storeSlug?: string; // present in cross-store search results
 }
 
+// ─── Bot Flow State ───────────────────────────────────────────────────────────
+
+export interface CheckoutState {
+  storeSlug:     string;
+  step:          'name' | 'email' | 'addressList' | 'addressPicker' | 'freeAddress' | 'labelType' | 'delivery' | 'payment' | 'confirm' | string;
+  name?:         string;
+  email?:        string;
+  
+  // New address flow state
+  province?:     string;
+  city?:         string;
+  barangay?:     string;
+  streetLine?:   string;
+  postalCode?:   string;
+  addressId?:    number;
+  lat?:          number;
+  lng?:          number;
+
+  address?:      string;
+  deliveryType?: 'delivery' | 'pickup' | string;
+  paymentMethod?: string;  // e.g. 'cod', 'mock', 'assisted', 'paymongo', 'stripe'
+}
+
 // ─── Admin UI ─────────────────────────────────────────────────────────────────
 
 export type AdminTabId =
