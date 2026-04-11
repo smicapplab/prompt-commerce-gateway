@@ -160,34 +160,62 @@ export class PaymentService {
 
     const result = await adapter.initiatePayment(orderCtx);
 
-    // Persist the payment record
-    const payment = await this.prisma.payment.create({
-      data: {
-        referenceId: result.referenceId,
-        storeSlug:   input.storeSlug,
-        orderId:     input.orderId,
-        buyerRef:    input.buyerRef,
-        amount:      input.amount,
-        currency:    input.currency || 'PHP',
-        provider,
-        status:      result.status,
-        paymentUrl:  result.paymentUrl ?? null,
-        successUrl:  orderCtx.successUrl,
-        cancelUrl:   orderCtx.cancelUrl,
-        paymentInstructions: instructions,
-        orderCreatedAt:      new Date(),
-      },
-    });
+    try {
+      // Persist the payment record
+      const payment = await this.prisma.payment.create({
+        data: {
+          referenceId: result.referenceId,
+          storeSlug:   input.storeSlug,
+          orderId:     input.orderId,
+          buyerRef:    input.buyerRef,
+          amount:      input.amount,
+          currency:    input.currency || 'PHP',
+          provider,
+          status:      result.status,
+          paymentUrl:  result.paymentUrl ?? null,
+          successUrl:  orderCtx.successUrl,
+          cancelUrl:   orderCtx.cancelUrl,
+          paymentInstructions: instructions,
+          orderCreatedAt:      new Date(),
+        },
+      });
 
-    return {
-      id:          payment.id,
-      referenceId: payment.referenceId,
-      status:      payment.status,
-      paymentUrl:  payment.paymentUrl,
-      successUrl:  payment.successUrl,
-      cancelUrl:   payment.cancelUrl,
-      provider:    payment.provider,
-    };
+      return {
+        id:          payment.id,
+        referenceId: payment.referenceId,
+        status:      payment.status,
+        paymentUrl:  payment.paymentUrl,
+        successUrl:  payment.successUrl,
+        cancelUrl:   payment.cancelUrl,
+        provider:    payment.provider,
+      };
+    } catch (err: any) {
+      // Handle race condition: if another process created the payment record between our check and create
+      // Prisma error P2002 is Unique constraint failed
+      if (err.code === 'P2002') {
+        this.logger.warn(`Race condition: Payment already exists for order ${input.orderId}. Fetching existing record.`);
+        const raceExisting = await this.prisma.payment.findUnique({
+          where: {
+            storeSlug_orderId: {
+              storeSlug: input.storeSlug,
+              orderId:   input.orderId,
+            },
+          },
+        });
+        if (raceExisting) {
+          return {
+            id:          raceExisting.id,
+            referenceId: raceExisting.referenceId,
+            status:      raceExisting.status,
+            paymentUrl:  raceExisting.paymentUrl,
+            successUrl:  raceExisting.successUrl,
+            cancelUrl:   raceExisting.cancelUrl,
+            provider:    raceExisting.provider,
+          };
+        }
+      }
+      throw err;
+    }
   }
 
   // ── Handle incoming webhook ────────────────────────────────────────────────

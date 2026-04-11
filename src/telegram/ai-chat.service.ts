@@ -12,7 +12,7 @@ import { callRetailerTool, type RetailerTarget } from '../mcp/retailer-client';
 import { ConversationService } from '../chat/conversation.service';
 import { ChatService } from '../chat/chat.service';
 import { SettingsService } from '../settings/settings.service';
-import { isSsrfSafe } from '../utils/ssrf';
+import { isSsrfSafe, safeFetch } from '../utils/ssrf';
 
 // ─── Store AI config (read from Retailer row) ────────────────────────────────
 export interface StoreAiConfig {
@@ -588,17 +588,15 @@ export class AiChatService {
 
   // ─── fetch_url: fetch a public URL and return text + image list ──────────
   private async fetchUrl(url: string): Promise<string> {
-    if (!(await isSsrfSafe(url))) {
-      return 'Error: URL is unsafe or invalid.';
-    }
     try {
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,*/*',
           'Accept-Language': 'en-US,en;q=0.9',
         },
         // 10-second timeout
+        // @ts-ignore - custom RequestInit
         signal: AbortSignal.timeout(10_000),
       });
 

@@ -19,6 +19,9 @@ import {
   HttpCode,
   Logger,
   UnauthorizedException,
+  HttpException,
+  HttpStatus,
+  Inject,
 } from '@nestjs/common';
 
 import { Request, Response } from 'express';
@@ -26,12 +29,15 @@ import { PaymentService } from './payment.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { SettingsService } from '../settings/settings.service';
 import { KeysService } from '../keys/keys.service';
+import { PrismaClient } from '@prisma/client';
+import { PRISMA } from '../prisma/prisma.module';
 
 @Controller()
 export class WebhookController {
   private readonly logger = new Logger(WebhookController.name);
 
   constructor(
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
     private readonly paymentService: PaymentService,
     private readonly telegramService: TelegramService,
     private readonly settings: SettingsService,
@@ -85,23 +91,39 @@ export class WebhookController {
     if (!valid) throw new UnauthorizedException('Invalid gateway key.');
   }
 
-  // ── Rate Limiting (In-memory) ──────────────────────────────────────────────
-  private readonly rateLimits = new Map<string, { count: number; resetAt: number }>();
+  // ── Rate Limiting (Persistent via Prisma) ──────────────────────────────────
 
-  private isRateLimited(ip: string): boolean {
-    const now = Date.now();
+  private async isRateLimited(ip: string): Promise<boolean> {
+    const key = `webhook_rate_limit:${ip}`;
+    const now = new Date();
     const limit = 10; // requests
-    const window = 60000; // 1 minute
+    const windowMs = 60000; // 1 minute
 
-    let record = this.rateLimits.get(ip);
-    if (!record || now > record.resetAt) {
-      record = { count: 0, resetAt: now + window };
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const record = await tx.rateLimit.findUnique({ where: { key } });
+
+        if (!record || now > record.resetAt) {
+          await tx.rateLimit.upsert({
+            where: { key },
+            create: { key, count: 1, resetAt: new Date(now.getTime() + windowMs) },
+            update: { count: 1, resetAt: new Date(now.getTime() + windowMs) },
+          });
+          return false;
+        }
+
+        const newCount = record.count + 1;
+        await tx.rateLimit.update({
+          where: { key },
+          data: { count: newCount },
+        });
+
+        return newCount > limit;
+      });
+    } catch (err) {
+      this.logger.error(`Rate limit check failed for ${ip}: ${err}`);
+      return false; // Fail open to avoid blocking valid webhooks
     }
-
-    record.count++;
-    this.rateLimits.set(ip, record);
-
-    return record.count > limit;
   }
 
   // ── Telegram webhook ───────────────────────────────────────────────────────
@@ -132,9 +154,12 @@ export class WebhookController {
     @Headers('stripe-signature') stripeSig?: string,
   ) {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    if (this.isRateLimited(ip)) {
+    if (await this.isRateLimited(ip)) {
       this.logger.warn(`Webhook rate limit hit for IP ${ip} (slug: ${slug})`);
-      return { received: false, error: 'Too many requests' }; 
+      throw new HttpException({
+        status: HttpStatus.TOO_MANY_REQUESTS,
+        error: 'Too many requests',
+      }, HttpStatus.TOO_MANY_REQUESTS);
     }
 
     // L4: Ensure Content-Type is application/json

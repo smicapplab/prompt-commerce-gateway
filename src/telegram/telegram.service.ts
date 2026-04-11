@@ -1529,10 +1529,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           const baseUrl = process.env.GATEWAY_PUBLIC_URL?.replace(/\/$/, '')
             ?? `http://localhost:${process.env.PORT ?? process.env.GATEWAY_PORT ?? 3002}`;
 
-          // Payment record is created inside initiatePayment (which must support the transaction)
-          // For now, we'll call it normally but since it's the LAST step in this try block,
-          // if it fails, the outer catch will handle it.
-          // Note: Payment record is actually created in initiatePayment's own logic.
           const payment = await this.paymentService.initiatePayment({
             orderId,
             storeSlug:   slug,
@@ -1617,24 +1613,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.checkoutSessions.delete(userId);
 
       // ── Notify seller of new order ────────────────────────────────────────
-...
-            });
-          }
+      if (retailer.telegramNotifyChatId && this.bot) {
+        try {
+          const itemLines = items.map(i => `• ${i.title} × ${i.quantity} = ${price(i.price * i.quantity)}`).join('\n');
+          const notifyMsg =
+            `🔔 <b>New Order #${orderId}</b>\n\n` +
+            `<b>Store:</b> ${esc(retailer.name)}\n` +
+            `<b>Customer:</b> ${esc(state.name || 'Telegram Buyer')} (${userId})\n\n` +
+            `<b>Items:</b>\n${itemLines}\n\n` +
+            `<b>Total: ${price(total)}</b>\n\n` +
+            `<b>Address:</b>\n${esc(state.address)}\n\n` +
+            `<b>Payment:</b> ${esc(state.paymentMethod?.toUpperCase() || 'N/A')}\n\n` +
+            `<i>Check Admin Panel for details.</i>`;
+
+          await this.bot.api.sendMessage(retailer.telegramNotifyChatId, notifyMsg, { parse_mode: 'HTML' });
         } catch (e) {
-          this.logger.warn(`Could not load retailer for seller notify (${slug}): ${e}`);
+          this.logger.warn(`Could not send Telegram notification to seller (${retailer.telegramNotifyChatId}): ${e}`);
         }
       }
 
-      return;
     } catch (err: any) {
-...
-
-      // Fallback if no payment service or payment failed to initiate
-      await ctx.editMessageText(
-        orderConfirmation(orderId, items, total),
-        { parse_mode: 'HTML', reply_markup: backKeyboard(slug) },
-      );
-    } catch (err) {
       this.logger.error(`Order creation failed: ${err}`);
       this.checkoutSessions.delete(userId);
       try {
@@ -1650,7 +1648,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ─── Notify user of order status change (called by OrdersService sync) ───────
   // ─── Notify user of order status change (called by OrdersService sync) ───────
   async notifyOrderStatusChange(params: {
     chatId: string;
@@ -1799,6 +1796,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!r.platformKey?.key) throw new Error(`No active key for store "${slug}"`);
     return {
       slug: r.slug,
+      name: r.name,
       mcpServerUrl: r.mcpServerUrl,
       platformKey: r.platformKey.key,
       allowsPickup: r.allowsPickup,
@@ -1807,6 +1805,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       paymentMethods: r.paymentMethods,
       paymentInstructions: r.paymentInstructions,
       assistedLabel: r.assistedLabel,
+      telegramNotifyChatId: r.telegramNotifyChatId,
     };
   }
 

@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { isSsrfSafe } from '../utils/ssrf';
+import { resolveSafeIp } from '../utils/ssrf';
 
 export interface RetailerTarget {
   slug: string;
@@ -18,22 +18,22 @@ export async function callRetailerTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  // SEC-2: Validate URL to prevent SSRF
-  if (!(await isSsrfSafe(retailer.mcpServerUrl))) {
-    throw new Error(`Insecure MCP Server URL: ${retailer.mcpServerUrl}`);
-  }
+  // SEC-2: Validate URL and pin IP to prevent DNS rebinding SSRF
+  const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
+  const originalHostname = sseUrl.hostname;
+  const safeIp = await resolveSafeIp(originalHostname);
+  sseUrl.hostname = safeIp;
 
   const client = new Client(
     { name: 'prompt-commerce-gateway', version: '1.0.0' },
     { capabilities: {} },
   );
 
-  const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
-
   const transport = new SSEClientTransport(sseUrl, {
     requestInit: {
       headers: {
         'x-gateway-key': retailer.platformKey,
+        'Host': originalHostname,
       },
     },
   });
@@ -51,7 +51,7 @@ export async function callRetailerTool(
     return await Promise.race([callPromise, timeoutPromise]);
   } finally {
     clearTimeout(timeoutHandle!);
-    await client.close().catch(() => {});
+    await client.close().catch(() => { });
   }
 }
 
@@ -60,20 +60,25 @@ export async function callRetailerTool(
  * Used to verify the MCP URL and key are working during onboarding.
  */
 export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
-  // SEC-2: Validate URL to prevent SSRF
-  if (!(await isSsrfSafe(retailer.mcpServerUrl))) {
-    return false;
-  }
+  // SEC-2: Validate URL and pin IP to prevent DNS rebinding SSRF
+  const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
+  const originalHostname = sseUrl.hostname;
+  const safeIp = await resolveSafeIp(originalHostname);
+  sseUrl.hostname = safeIp;
 
   const client = new Client(
     { name: 'prompt-commerce-gateway', version: '1.0.0' },
     { capabilities: {} },
   );
 
-  const transport = new SSEClientTransport(
-    new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`),
-    { requestInit: { headers: { 'x-gateway-key': retailer.platformKey } } },
-  );
+  const transport = new SSEClientTransport(sseUrl, {
+    requestInit: {
+      headers: {
+        'x-gateway-key': retailer.platformKey,
+        'Host': originalHostname,
+      },
+    },
+  });
 
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise((_, reject) => {
@@ -91,6 +96,6 @@ export async function pingRetailer(retailer: RetailerTarget): Promise<boolean> {
     return false;
   } finally {
     clearTimeout(timeoutHandle!);
-    await client.close().catch(() => {});
+    await client.close().catch(() => { });
   }
 }
