@@ -139,11 +139,19 @@ export class ConversationService {
     }
 
     // 2. Log and mirror (this handles both PostgreSQL and SQLite)
-    return this.logMessage(conversationId, conv.storeSlug, 'human', body, senderName);
+    return this.logMessage(conversationId, conv.storeSlug, 'human', body, senderName, false, conv);
   }
 
   /** Log a message to gateway (PostgreSQL) and mirror to seller (SQLite) */
-  async logMessage(conversationId: number, storeSlug: string, senderType: SenderType, body: string, senderName?: string, skipMirror = false) {
+  async logMessage(
+    conversationId: number, 
+    storeSlug: string, 
+    senderType: SenderType, 
+    body: string, 
+    senderName?: string, 
+    skipMirror = false,
+    conversation?: { buyerRef: string; channel: string }
+  ) {
     const msg = await this.prisma.message.create({
       data: {
         conversationId,
@@ -157,7 +165,7 @@ export class ConversationService {
 
     // Mirror to seller app (fire-and-forget)
     // We need the seller-side conversation ID. For simplicity, we use buyer_ref to find it on their side.
-    const conv = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    const conv = conversation || await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     if (conv) {
       this.mirrorToSeller(storeSlug, 'POST', `/api/conversations/lookup`, {
         buyer_ref: conv.buyerRef,

@@ -629,7 +629,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           const conv = await this.conversationService.getOrCreate(String(userId), ctx.from.first_name || 'Buyer', slug);
           if (conv.mode === 'ai') {
             await this.conversationService.setMode(conv.id, 'human');
-            await this.conversationService.logMessage(conv.id, slug, 'system', 'Buyer requested a human agent via keyword');
+            await this.conversationService.logMessage(conv.id, slug, 'system', 'Buyer requested a human agent via keyword', undefined, false, conv);
             await ctx.reply('Hang tight! I\'ve notified a store representative to join the chat. Someone will be with you shortly.');
             return;
           }
@@ -1544,7 +1544,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             storeSlug:   slug,
             buyerRef:    userId,
             amount:      total,
-            currency:    'PHP',
             description: `Order #${orderId} — ${slug}`,
             buyerEmail:  state.email,
             baseUrl,
@@ -1759,13 +1758,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const buyerName = `${firstName} ${lastName}`.trim() || ctx.from?.username || 'Buyer';
     
     const conv = await this.conversationService.getOrCreate(String(userId), buyerName, storeSlug);
-    await this.conversationService.logMessage(conv.id, storeSlug, 'buyer', text);
+    await this.conversationService.logMessage(conv.id, storeSlug, 'buyer', text, undefined, false, conv);
 
     await ctx.replyWithChatAction('typing');
 
     try {
       const retailer = await this.getRetailer(storeSlug);
-      const result: ChatResult = await this.aiChat.chat(userId, storeSlug, store.name, retailer, text, aiConfig, conv.id);
+      const result: ChatResult = await this.aiChat.chat(userId, storeSlug, store.name, retailer, text, aiConfig, conv);
 
       const cartCount = (await this.cartService.get(userId, storeSlug)).length;
       const shell = buildAiChatFooter(storeSlug, store.name, 'telegram', cartCount);

@@ -1,7 +1,8 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 import { TelegramService } from '../telegram/telegram.service';
+import { OrderSyncPayload, SellerOrder, SellerOrderNote, SellerOrderFile } from '../shared/types';
 
 @Injectable()
 export class OrdersService {
@@ -12,7 +13,7 @@ export class OrdersService {
     private readonly telegram: TelegramService,
   ) {}
 
-  async sync(slug: string, payload: any) {
+  async sync(slug: string, payload: OrderSyncPayload) {
     const { upsert } = payload;
     const { orders = [], orderNotes = [], orderFiles = [] } = upsert || {};
 
@@ -23,13 +24,13 @@ export class OrdersService {
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Sync Orders (Mirror to Payment model)
-      const orderIds = orders.map((o: any) => o.id);
+      const orderIds = orders.map((o: SellerOrder) => o.id);
       const existingPayments = await tx.payment.findMany({
         where: { storeSlug: slug, orderId: { in: orderIds } }
       });
       const existingMap = new Map(existingPayments.map(p => [p.orderId, p]));
 
-      for (const o of orders) {
+      for (const o of orders as SellerOrder[]) {
         let payment = existingMap.get(o.id);
 
         if (!payment) {
@@ -59,12 +60,12 @@ export class OrdersService {
             where: { id: payment.id },
             data: {
               orderStatus:         o.status,
-              deliveryType:        o.delivery_type,
-              trackingNumber:      o.tracking_number,
-              courierName:         o.courier_name,
-              trackingUrl:         o.tracking_url,
-              cancellationReason:  o.cancellation_reason,
-              paymentInstructions: o.payment_instructions,
+              deliveryType:        o.delivery_type || undefined,
+              trackingNumber:      o.tracking_number || undefined,
+              courierName:         o.courier_name || undefined,
+              trackingUrl:         o.tracking_url || undefined,
+              cancellationReason:  o.cancellation_reason || undefined,
+              paymentInstructions: o.payment_instructions || undefined,
               orderCreatedAt:      o.created_at ? new Date(o.created_at) : undefined,
               terminalStatusAt:    ['delivered', 'picked_up', 'cancelled', 'refunded'].includes(o.status) ? new Date() : undefined,
             }
@@ -76,18 +77,18 @@ export class OrdersService {
               orderId:             o.id,
               storeName:           retailer.name,
               newStatus:           o.status,
-              trackingNumber:      o.tracking_number,
-              courierName:         o.courier_name,
-              trackingUrl:         o.tracking_url,
-              cancellationReason:  o.cancellation_reason,
-              paymentInstructions: o.payment_instructions,
+              trackingNumber:      o.tracking_number || undefined,
+              courierName:         o.courier_name || undefined,
+              trackingUrl:         o.tracking_url || undefined,
+              cancellationReason:  o.cancellation_reason || undefined,
+              paymentInstructions: o.payment_instructions || undefined,
             }).catch(e => this.logger.error(`Failed to notify status change: ${e}`));
           }
         }
       }
 
       // 2. Sync Notes
-      for (const n of orderNotes) {
+      for (const n of orderNotes as SellerOrderNote[]) {
         const payment = existingMap.get(n.order_id);
         if (!payment) continue;
 
@@ -119,7 +120,7 @@ export class OrdersService {
       }
 
       // 3. Sync Files
-      for (const f of orderFiles) {
+      for (const f of orderFiles as SellerOrderFile[]) {
         const payment = existingMap.get(f.order_id);
         if (!payment) continue;
 
@@ -168,7 +169,7 @@ export class OrdersService {
     const { store, status, deliveryType, page, limit } = filters;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.PaymentWhereInput = {};
     if (store) where.storeSlug = store;
     if (status) where.orderStatus = status;
     if (deliveryType) where.deliveryType = deliveryType;
@@ -198,7 +199,7 @@ export class OrdersService {
       // PERF: Instead of fetching every terminal order into memory and calculating in JS,
       // use SQL aggregation to calculate average fulfillment hours directly in the DB.
       // EXTRACT(EPOCH FROM ...) returns seconds; divide by 3600 for hours.
-      const avgRes = await tx.$queryRaw<any[]>`
+      const avgRes = await tx.$queryRaw<{ avgHours: number | null }[]>`
         SELECT AVG(EXTRACT(EPOCH FROM (terminal_status_at - order_created_at))) / 3600 as "avgHours"
         FROM payments
         WHERE (${store}::text IS NULL OR store_slug = ${store})

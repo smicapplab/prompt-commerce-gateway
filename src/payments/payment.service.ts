@@ -23,7 +23,7 @@ export interface InitiatePaymentInput {
   storeSlug:    string;
   buyerRef:     string;   // Telegram userId as string
   amount:       number;
-  currency:     string;
+  currency?:    string;
   description:  string;
   buyerEmail?:  string;
   // These are assembled by the service from env / request:
@@ -139,14 +139,17 @@ export class PaymentService {
     const provider = adapter.name;
 
     // Load defaults for Assisted/COD if not overridden
-    let paymentLinkTemplate = await this.settings.get('default_payment_link_template');
-    let instructions = await this.settings.get('default_payment_instructions');
+    const paymentLinkTemplate = await this.settings.get('default_payment_link_template');
+    const instructions = await this.settings.get('default_payment_instructions');
+
+    // Resolve currency fallback (Env > DB Setting > 'PHP')
+    const globalDefaultCurrency = process.env.DEFAULT_CURRENCY || (await this.settings.get('default_currency')) || 'PHP';
 
     const orderCtx: OrderContext = {
       orderId:    input.orderId,
       storeSlug:  input.storeSlug,
       amount:     input.amount,
-      currency:   input.currency || 'PHP',
+      currency:   input.currency || globalDefaultCurrency,
       description: input.description,
       buyerEmail: input.buyerEmail,
       webhookUrl: `${input.baseUrl}/webhooks/payment/${input.storeSlug}`,
@@ -169,7 +172,7 @@ export class PaymentService {
           orderId:     input.orderId,
           buyerRef:    input.buyerRef,
           amount:      input.amount,
-          currency:    input.currency || 'PHP',
+          currency:    input.currency || globalDefaultCurrency,
           provider,
           status:      result.status,
           paymentUrl:  result.paymentUrl ?? null,

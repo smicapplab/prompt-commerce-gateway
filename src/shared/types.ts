@@ -49,10 +49,16 @@ export interface Order {
   deliveryType: string;
   trackingNumber?: string | null;
   courierName?: string | null;
+  trackingUrl?: string | null;
+  cancellationReason?: string | null;
+  paymentInstructions?: string | null;
   provider?: string | null;
   createdAt: string | Date;
   updatedAt: string | Date;
+  terminalStatusAt?: string | Date | null;
+  orderCreatedAt?: string | Date | null;
   orderNotes?: OrderNote[];
+  orderFiles?: OrderFile[];
 }
 
 export interface OrderNote {
@@ -63,6 +69,72 @@ export interface OrderNote {
   createdBy: string;
   createdAt: string | Date;
   deletedAt?: string | Date | null;
+  deletedBy?: string | null;
+}
+
+export interface OrderFile {
+  id: number;
+  sellerId: number;
+  paymentId: number;
+  filename: string;
+  originalName: string;
+  fileUrl: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedBy: string;
+  uploadedAt: string | Date;
+  deletedAt?: string | Date | null;
+  deletedBy?: string | null;
+}
+
+// ─── Seller App Sync Payloads ────────────────────────────────────────────────
+
+export interface SellerOrder {
+  id: number;
+  status: string;
+  total?: number | null;
+  buyer_ref?: string | null;
+  payment_provider?: string | null;
+  delivery_type?: string | null;
+  tracking_number?: string | null;
+  courier_name?: string | null;
+  tracking_url?: string | null;
+  cancellation_reason?: string | null;
+  payment_instructions?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SellerOrderNote {
+  id: number;
+  order_id: number;
+  note: string;
+  created_by: string;
+  created_at: string;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+}
+
+export interface SellerOrderFile {
+  id: number;
+  order_id: number;
+  filename: string;
+  original_name: string;
+  file_url: string;
+  mime_type: string;
+  size_bytes: number;
+  uploaded_by: string;
+  uploaded_at: string;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+}
+
+export interface OrderSyncPayload {
+  upsert: {
+    orders?: SellerOrder[];
+    orderNotes?: SellerOrderNote[];
+    orderFiles?: SellerOrderFile[];
+  };
 }
 
 export interface Conversation {

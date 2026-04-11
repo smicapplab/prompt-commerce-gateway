@@ -12,6 +12,7 @@ export class SettingsService implements OnApplicationBootstrap {
       { key: 'default_payment_instructions', value: '' },
       { key: 'default_payment_link_template', value: '' },
       { key: 'default_payment_label', value: 'Assisted Payment' },
+      { key: 'default_currency', value: 'PHP' },
     ];
 
     for (const { key, value } of defaults) {

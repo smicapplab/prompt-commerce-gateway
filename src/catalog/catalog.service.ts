@@ -11,7 +11,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PRISMA } from '../prisma/prisma.module';
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { parseSearchQuery } from './parse-search-query';
 
 export class SyncCategoryDto {
@@ -122,7 +122,7 @@ export class CatalogService {
     const { categoryId, search, limit = 20, offset = 0, sort } = opts;
     const where = this._buildProductsWhere(storeSlug, { categoryId, search });
 
-    let orderBy: any = { title: 'asc' };
+    let orderBy: Prisma.CachedProductOrderByWithRelationInput = { title: 'asc' };
     if (sort === 'price_asc') orderBy = { price: 'asc' };
     if (sort === 'price_desc') orderBy = { price: 'desc' };
     if (sort === 'newest') orderBy = { syncedAt: 'desc' };
@@ -143,9 +143,9 @@ export class CatalogService {
     return this.prisma.cachedProduct.count({ where });
   }
 
-  private _buildProductsWhere(storeSlug: string, opts: { categoryId?: number; search?: string }) {
+  private _buildProductsWhere(storeSlug: string, opts: { categoryId?: number; search?: string }): Prisma.CachedProductWhereInput {
     const { categoryId, search } = opts;
-    let where: any = { storeSlug, active: true };
+    let where: Prisma.CachedProductWhereInput = { storeSlug, active: true };
     
     if (categoryId) {
       where.categoryId = categoryId;

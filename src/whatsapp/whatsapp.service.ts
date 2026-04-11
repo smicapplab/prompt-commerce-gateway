@@ -234,7 +234,7 @@ export class WhatsAppService implements OnModuleInit {
     if (session?.storeSlug) {
       try {
         const conv = await this.conversationService.getOrCreate(String(waId), name || 'Buyer', session.storeSlug, 'whatsapp');
-        await this.conversationService.logMessage(conv.id, session.storeSlug, 'buyer', text);
+        await this.conversationService.logMessage(conv.id, session.storeSlug, 'buyer', text, undefined, false, conv);
       } catch (err) {
         this.logger.error(`Failed to log message: ${err}`);
       }
@@ -359,7 +359,6 @@ export class WhatsAppService implements OnModuleInit {
           storeSlug: slug,
           buyerRef: waId,
           amount: total,
-          currency: 'PHP',
           description: `Order #${orderId} at ${retailer.name}`,
           baseUrl,
           providerOverride: session.paymentMethod
@@ -484,7 +483,7 @@ export class WhatsAppService implements OnModuleInit {
           { slug: retailer.slug, mcpServerUrl: retailer.mcpServerUrl, platformKey: retailer.platformKey?.key || '' },
           text,
           aiConfig,
-          conv.id,
+          conv,
           'whatsapp'
         );
 

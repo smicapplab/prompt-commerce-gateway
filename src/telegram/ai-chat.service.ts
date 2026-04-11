@@ -139,6 +139,9 @@ const MAX_HISTORY = 20;
 @Injectable()
 export class AiChatService {
   private readonly logger = new Logger(AiChatService.name);
+  private anthropicClients = new Map<string, Anthropic>();
+  private openAiClients = new Map<string, OpenAI>();
+  private geminiClients = new Map<string, GoogleGenerativeAI>();
 
   constructor(
     private readonly catalog: CatalogService,
@@ -146,6 +149,33 @@ export class AiChatService {
     private readonly chatService: ChatService,
     private readonly settings: SettingsService,
   ) {}
+
+  private getAnthropicClient(apiKey: string): Anthropic {
+    let client = this.anthropicClients.get(apiKey);
+    if (!client) {
+      client = new Anthropic({ apiKey });
+      this.anthropicClients.set(apiKey, client);
+    }
+    return client;
+  }
+
+  private getOpenAiClient(apiKey: string): OpenAI {
+    let client = this.openAiClients.get(apiKey);
+    if (!client) {
+      client = new OpenAI({ apiKey });
+      this.openAiClients.set(apiKey, client);
+    }
+    return client;
+  }
+
+  private getGeminiClient(apiKey: string): GoogleGenerativeAI {
+    let client = this.geminiClients.get(apiKey);
+    if (!client) {
+      client = new GoogleGenerativeAI(apiKey);
+      this.geminiClients.set(apiKey, client);
+    }
+    return client;
+  }
 
   private async getDefaultModel(provider: 'claude' | 'gemini' | 'openai'): Promise<string> {
     const key = `default_ai_model_${provider}`;
@@ -175,9 +205,10 @@ export class AiChatService {
     retailer: RetailerTarget,
     userMessage: string,
     config: StoreAiConfig,
-    conversationId?: number,
+    conversation?: any,
     platform: 'telegram' | 'whatsapp' = 'telegram',
   ): Promise<ChatResult> {
+    const conversationId = conversation?.id;
     this.logger.log(`[AiChat] Message from user ${userId} for store ${storeSlug} on ${platform}: "${userMessage}"`);
 
     // ── Load history from DB if conversation exists ──────────────────────────
@@ -196,16 +227,16 @@ export class AiChatService {
 
     let result: ChatResult;
     if (config.provider === 'gemini') {
-      result = await this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history, platform);
+      result = await this.chatGemini(userId, storeSlug, storeName, retailer, userMessage, config, conversation, history, platform);
     } else if (config.provider === 'openai') {
-      result = await this.chatOpenAi(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history, platform);
+      result = await this.chatOpenAi(userId, storeSlug, storeName, retailer, userMessage, config, conversation, history, platform);
     } else {
-      result = await this.chatClaude(userId, storeSlug, storeName, retailer, userMessage, config, conversationId, history, platform);
+      result = await this.chatClaude(userId, storeSlug, storeName, retailer, userMessage, config, conversation, history, platform);
     }
 
     // ── Unified Logging: Log AI reply ──
-    if (conversationId) {
-      await this.conversationService.logMessage(conversationId, storeSlug, 'ai', result.text, 'AI Bot');
+    if (conversation) {
+      await this.conversationService.logMessage(conversation.id, storeSlug, 'ai', result.text, 'AI Bot', false, conversation);
     }
 
     return result;
@@ -219,11 +250,12 @@ export class AiChatService {
     retailer: RetailerTarget,
     userMessage: string,
     config: StoreAiConfig,
-    conversationId?: number,
+    conversation?: any,
     history: HistoryMessage[] = [],
     platform: 'telegram' | 'whatsapp' = 'telegram',
   ): Promise<ChatResult> {
-    const client = new Anthropic({ apiKey: config.apiKey });
+    const conversationId = conversation?.id;
+    const client = this.getAnthropicClient(config.apiKey);
     const model  = config.model || (await this.getDefaultModel('claude'));
 
     const formatNote = platform === 'whatsapp'
@@ -273,7 +305,7 @@ export class AiChatService {
 
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const tool of toolCalls) {
-        const toolResult = await this.callTool(retailer, tool.name, tool.input as Record<string, unknown>, config, conversationId);
+        const toolResult = await this.callTool(retailer, tool.name, tool.input as Record<string, unknown>, config, conversation);
         if (tool.name === 'search_products') {
           try {
             const parsed = JSON.parse(toolResult);
@@ -305,11 +337,12 @@ export class AiChatService {
     retailer: RetailerTarget,
     userMessage: string,
     config: StoreAiConfig,
-    conversationId?: number,
+    conversation?: any,
     history: HistoryMessage[] = [],
     platform: 'telegram' | 'whatsapp' = 'telegram',
   ): Promise<ChatResult> {
-    const genAI = new GoogleGenerativeAI(config.apiKey);
+    const conversationId = conversation?.id;
+    const genAI = this.getGeminiClient(config.apiKey);
     const modelName = config.model || (await this.getDefaultModel('gemini'));
 
     const formatNote = platform === 'whatsapp'
@@ -359,7 +392,7 @@ export class AiChatService {
       // Execute each function call sequentially so we can capture products
       const fnResults: any[] = [];
       for (const p of fnCalls) {
-        const toolResult = await this.callTool(retailer, p.functionCall!.name, p.functionCall!.args as Record<string, unknown>, config, conversationId);
+        const toolResult = await this.callTool(retailer, p.functionCall!.name, p.functionCall!.args as Record<string, unknown>, config, conversation);
         if (p.functionCall!.name === 'search_products') {
           try {
             const parsed = JSON.parse(toolResult);
@@ -397,11 +430,12 @@ export class AiChatService {
     retailer: RetailerTarget,
     userMessage: string,
     config: StoreAiConfig,
-    conversationId?: number,
+    conversation?: any,
     history: HistoryMessage[] = [],
     platform: 'telegram' | 'whatsapp' = 'telegram',
   ): Promise<ChatResult> {
-    const client = new OpenAI({ apiKey: config.apiKey });
+    const conversationId = conversation?.id;
+    const client = this.getOpenAiClient(config.apiKey);
     const model  = config.model || (await this.getDefaultModel('openai'));
     const deadline = Date.now() + 30_000;
 
@@ -463,7 +497,7 @@ export class AiChatService {
       for (const tc of choice.message.tool_calls) {
         const fn = (tc as any).function as { name: string; arguments: string };
         const args = JSON.parse(fn.arguments || '{}');
-        const result = await this.callTool(retailer, fn.name, args, config, conversationId);
+        const result = await this.callTool(retailer, fn.name, args, config, conversation);
         if (fn.name === 'search_products') {
           try {
             const parsed = JSON.parse(result);
@@ -492,8 +526,9 @@ export class AiChatService {
     toolName: string,
     args: Record<string, unknown>,
     config?: StoreAiConfig,
-    conversationId?: number,
+    conversation?: any,
   ): Promise<string> {
+    const conversationId = conversation?.id;
     const startTime = Date.now();
     this.logger.log(`[AiChat] Tool Call: ${toolName} with args: ${JSON.stringify(args)}`);
 
@@ -514,9 +549,9 @@ export class AiChatService {
 
     // request_human_agent: trigger handover
     if (toolName === 'request_human_agent') {
-      if (conversationId) {
-        await this.conversationService.setMode(conversationId, 'human');
-        await this.conversationService.logMessage(conversationId, retailer.slug, 'system', `AI requested human assistance: ${args.reason || 'No reason provided'}`);
+      if (conversation) {
+        await this.conversationService.setMode(conversation.id, 'human');
+        await this.conversationService.logMessage(conversation.id, retailer.slug, 'system', `AI requested human assistance: ${args.reason || 'No reason provided'}`, undefined, false, conversation);
         return 'Request sent. A human agent will take over shortly. Please tell the user that someone will be with them soon.';
       }
       return 'Error: conversation not found.';

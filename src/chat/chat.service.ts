@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PRISMA } from '../prisma/prisma.module';
 
 @Injectable()
@@ -19,9 +19,9 @@ export class ChatService {
     const { storeSlug, mode, page = 1, limit = 50 } = params;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.ConversationWhereInput = {};
     if (storeSlug) where.storeSlug = storeSlug;
-    if (mode) where.mode = mode;
+    if (mode) where.mode = mode as any;
 
     const [conversations, total] = await Promise.all([
       this.prisma.conversation.findMany({

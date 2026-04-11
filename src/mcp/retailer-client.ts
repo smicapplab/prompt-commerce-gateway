@@ -8,50 +8,96 @@ export interface RetailerTarget {
   platformKey: string;
 }
 
+interface PoolEntry {
+  client: Client;
+  transport: SSEClientTransport;
+  timer?: NodeJS.Timeout;
+}
+
+const connectionPool = new Map<string, PoolEntry>();
+const IDLE_TIMEOUT = 30000;
+
+async function getResourceKey(retailer: RetailerTarget): Promise<string> {
+  // Use a predictable key based on URL and key
+  return `${retailer.mcpServerUrl}|${retailer.platformKey}`;
+}
+
 /**
  * Calls a single tool on a retailer's self-hosted MCP server.
- * Creates a fresh client per call — simple and stateless for the prototype.
- * Add connection pooling later when you need performance.
+ * Uses a connection pool to reuse established SSE connections.
  */
 export async function callRetailerTool(
   retailer: RetailerTarget,
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  // SEC-2: Validate URL and pin IP to prevent DNS rebinding SSRF
-  const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
-  const originalHostname = sseUrl.hostname;
-  const safeIp = await resolveSafeIp(originalHostname);
-  sseUrl.hostname = safeIp;
+  const key = await getResourceKey(retailer);
+  let entry = connectionPool.get(key);
 
-  const client = new Client(
-    { name: 'prompt-commerce-gateway', version: '1.0.0' },
-    { capabilities: {} },
-  );
+  if (entry?.timer) {
+    clearTimeout(entry.timer);
+    entry.timer = undefined;
+  }
 
-  const transport = new SSEClientTransport(sseUrl, {
-    requestInit: {
-      headers: {
-        'x-gateway-key': retailer.platformKey,
-        'Host': originalHostname,
+  if (!entry) {
+    // SEC-2: Validate URL and pin IP to prevent DNS rebinding SSRF
+    const sseUrl = new URL(`${retailer.mcpServerUrl}/sse/${retailer.slug}`);
+    const originalHostname = sseUrl.hostname;
+    const safeIp = await resolveSafeIp(originalHostname);
+    sseUrl.hostname = safeIp;
+
+    const client = new Client(
+      { name: 'prompt-commerce-gateway', version: '1.0.0' },
+      { capabilities: {} },
+    );
+
+    const transport = new SSEClientTransport(sseUrl, {
+      requestInit: {
+        headers: {
+          'x-gateway-key': retailer.platformKey,
+          'Host': originalHostname,
+        },
       },
-    },
-  });
+    });
 
+    try {
+      await client.connect(transport);
+      entry = { client, transport };
+      connectionPool.set(key, entry);
+    } catch (err) {
+      await client.close().catch(() => {});
+      throw err;
+    }
+  }
+
+  const { client } = entry;
+  
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise((_, reject) => {
     timeoutHandle = setTimeout(() => reject(new Error(`MCP timeout after 30s calling "${toolName}"`)), 30000);
   });
 
   try {
-    const callPromise = (async () => {
-      await client.connect(transport);
-      return await client.callTool({ name: toolName, arguments: args });
-    })();
+    const callPromise = client.callTool({ name: toolName, arguments: args });
     return await Promise.race([callPromise, timeoutPromise]);
+  } catch (err) {
+    // If the connection died, remove it from pool
+    connectionPool.delete(key);
+    await client.close().catch(() => {});
+    throw err;
   } finally {
     clearTimeout(timeoutHandle!);
-    await client.close().catch(() => { });
+    
+    // Set idle timer to close connection if not used
+    const currentEntry = connectionPool.get(key);
+    if (currentEntry) {
+      currentEntry.timer = setTimeout(async () => {
+        try {
+          await currentEntry.client.close();
+        } catch { }
+        connectionPool.delete(key);
+      }, IDLE_TIMEOUT);
+    }
   }
 }
 
