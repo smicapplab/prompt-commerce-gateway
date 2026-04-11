@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Query, Res, HttpStatus, Logger, BadRequest
 import { Response } from 'express';
 import { AddressPickerService, StructuredAddress } from './address-picker.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { SettingsService } from '../settings/settings.service';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -15,6 +16,8 @@ export class AddressPickerController implements OnModuleInit {
     private readonly service: AddressPickerService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsapp: WhatsAppService,
+    @Inject(forwardRef(() => TelegramService))
+    private readonly telegram: TelegramService,
     private readonly settings: SettingsService,
   ) { }
 
@@ -68,14 +71,17 @@ export class AddressPickerController implements OnModuleInit {
     if (cancelled) {
       if (session.channel === 'whatsapp') {
         await this.whatsapp.handlePickerCancelled(session.userId, session.storeSlug);
+      } else if (session.channel === 'telegram') {
+        await this.telegram.handlePickerCancelled(session.userId, session.storeSlug);
       }
       return { success: true };
     }
 
     if (session.channel === 'whatsapp') {
       await this.whatsapp.handlePickerAddress(session.userId, session.storeSlug, address);
+    } else if (session.channel === 'telegram') {
+      await this.telegram.handlePickerAddress(session.userId, session.storeSlug, address);
     }
-    // Telegram is handled client-side via Telegram.WebApp.sendData()
 
     return { success: true };
   }

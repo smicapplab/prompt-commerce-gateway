@@ -283,59 +283,69 @@
       const address = parsePlace(selectedPlace, unitInput.value.trim());
       const payload = { token, address };
 
+      // Parallel execution: send to server (robust) and via sendData (if available)
       if (channel === 'telegram') {
-        window.Telegram.WebApp.sendData(JSON.stringify(address));
-        window.Telegram.WebApp.close();
-      } else {
-        try {
-          const res = await fetch('/address-picker/submit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
+        try { window.Telegram.WebApp.sendData(JSON.stringify(address)); } catch(e) {}
+      }
 
-          if (res.ok) {
-            document.body.innerHTML = `
-              <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center">
-                <div class="bg-green-100 p-4 rounded-full mb-4">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <h1 class="text-2xl font-bold text-gray-900 mb-2">Address Saved!</h1>
-                <p class="text-gray-600">You can now close this tab and return to WhatsApp.</p>
+      try {
+        const res = await fetch('/address-picker/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (res.ok) {
+          document.body.innerHTML = `
+            <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center">
+              <div class="bg-green-100 p-4 rounded-full mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                </svg>
               </div>
-            `;
-          } else {
-            showError('Failed to save address. Please try again.');
+              <h1 class="text-2xl font-bold text-gray-900 mb-2">Address Saved!</h1>
+              <p class="text-gray-600 mb-6">You can now close this tab and return to the chat.</p>
+              ${channel === 'telegram' ? '' : '<button onclick="window.close()" class="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200">Close Tab</button>'}
+            </div>
+          `;
+          if (channel === 'telegram') {
+            setTimeout(() => window.Telegram.WebApp.close(), 1500);
           }
-        } catch (err) {
-          showError(err.message);
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          showError(errData.message || 'Failed to save address. Please try again.');
         }
+      } catch (err) {
+        showError(err.message);
       }
     });
 
     // ── Cancel ───────────────────────────────────────────────────────────────
-    cancelBtn.addEventListener('click', () => {
+    cancelBtn.addEventListener('click', async () => {
       if (channel === 'telegram') {
-        window.Telegram.WebApp.sendData(JSON.stringify({ cancelled: true }));
-        window.Telegram.WebApp.close();
-      } else {
-        fetch('/address-picker/submit', {
+        try { window.Telegram.WebApp.sendData(JSON.stringify({ cancelled: true })); } catch(e) {}
+      }
+      
+      try {
+        await fetch('/address-picker/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token, cancelled: true }),
-        }).then(() => {
-          document.body.innerHTML = `
-            <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center bg-gray-50">
-              <p class="text-gray-600 mb-6">You can now close this tab and type your address in the chat.</p>
-              <button onclick="window.close()" class="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200">
-                Close Tab
-              </button>
-            </div>
-          `;
-          setTimeout(() => window.close(), 1000);
         });
+      } catch (e) {}
+
+      document.body.innerHTML = `
+        <div class="flex flex-col items-center justify-center min-h-screen p-6 text-center bg-gray-50">
+          <p class="text-gray-600 mb-6">You can now close this tab and type your address in the chat.</p>
+          <button onclick="${channel === 'telegram' ? 'window.Telegram.WebApp.close()' : 'window.close()'}" class="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200">
+            Close Tab
+          </button>
+        </div>
+      `;
+      if (channel === 'telegram') {
+        setTimeout(() => window.Telegram.WebApp.close(), 1500);
+      } else {
+        setTimeout(() => window.close(), 1500);
       }
     });
 

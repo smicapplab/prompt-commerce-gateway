@@ -701,6 +701,63 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     await this.bot.api.sendMessage(chatId, text, { parse_mode: 'HTML', ...options });
   }
 
+  async handlePickerAddress(userId: string, storeSlug: string, address: any) {
+    const state = this.checkoutSessions.get(userId);
+    if (!state || state.storeSlug !== storeSlug) return;
+
+    // Sanitize and cap input lengths
+    const clean = {
+      streetLine:       String(address.streetLine  || '').slice(0, 200),
+      barangay:         String(address.barangay    || '').slice(0, 100),
+      city:             String(address.city        || '').slice(0, 100),
+      province:         String(address.province    || '').slice(0, 100),
+      formattedAddress: String(address.formattedAddress || '').slice(0, 300),
+      lat:  typeof address.lat === 'number' ? address.lat : null,
+      lng:  typeof address.lng === 'number' ? address.lng : null,
+    };
+
+    // Update session state
+    state.province = clean.province;
+    state.city = clean.city;
+    state.barangay = clean.barangay;
+    state.streetLine = clean.streetLine;
+    state.address = clean.formattedAddress;
+    state.lat = clean.lat;
+    state.lng = clean.lng;
+    state.step = 'labelType';
+    this.checkoutSessions.set(userId, state);
+
+    if (this.bot) {
+      await this.bot.api.sendMessage(userId, `✅ <b>Address confirmed:</b>\n${clean.formattedAddress}`, { parse_mode: 'HTML' });
+      
+      const kb = new InlineKeyboard()
+        .text('🏠 Home', 'lbl:Home')
+        .text('🏢 Office', 'lbl:Office').row()
+        .text('❌ Don\'t save, just use once', 'lbl:skip');
+      
+      await this.bot.api.sendMessage(userId, '💾 <b>Save Address As:</b>\n\nChoose a label, or type your own custom label (e.g. "Condo").', { 
+        parse_mode: 'HTML', 
+        reply_markup: kb 
+      });
+    }
+  }
+
+  async handlePickerCancelled(userId: string, storeSlug: string) {
+    const state = this.checkoutSessions.get(userId);
+    if (!state || state.storeSlug !== storeSlug) return;
+
+    state.step = 'freeAddress';
+    this.checkoutSessions.set(userId, state);
+
+    if (this.bot) {
+      await this.bot.api.sendMessage(userId, 
+        '📍 No problem! Please type your full delivery address:\n' +
+        '<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>',
+        { parse_mode: 'HTML' }
+      );
+    }
+  }
+
   // ─── Cross-store product search ─────────────────────────────────────────────
   private async sendSearchResults(
     ctx: any,
