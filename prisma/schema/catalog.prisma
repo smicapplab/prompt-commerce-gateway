@@ -32,7 +32,7 @@ model CachedProduct {
   stockQuantity Int      @default(0) @map("stock_quantity")
   categoryId    Int?     @map("category_id") // seller's category ID (not FK)
   tags          String[] // Postgres native array
-  aiTags        String[] @map("ai_tags") // Gateway-generated semantic tags (read-only)
+  aiTags        String[] @default([]) @map("ai_tags") // Gateway-generated semantic tags (read-only)
   images        String[] // Postgres native array
   active        Boolean  @default(true)
   syncedAt      DateTime @default(now()) @map("synced_at")

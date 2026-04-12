@@ -210,10 +210,14 @@ Rules:
    * Used by the admin backfill endpoint.
    */
   async backfill(storeSlug: string): Promise<{ queued: number }> {
-    const products = await this.prisma.cachedProduct.findMany({
-      where: { storeSlug, aiTags: { equals: [] } },
-      select: { id: true, title: true, description: true, tags: true },
-    });
+    // Raw query: match rows where ai_tags is NULL (pre-migration rows) or empty array.
+    // { equals: [] } does not match NULL — raw SQL is the reliable cross-version fix.
+    const products = await this.prisma.$queryRaw<Array<{ id: number; title: string; description: string | null; tags: string[] }>>`
+      SELECT id, title, description, tags
+      FROM cached_products
+      WHERE store_slug = ${storeSlug}
+        AND (ai_tags IS NULL OR array_length(ai_tags, 1) IS NULL)
+    `;
 
     if (!products.length) {
       this.logger.log(`[Tagging] No untagged products found for store "${storeSlug}".`);

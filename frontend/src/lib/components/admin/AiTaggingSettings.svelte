@@ -153,23 +153,29 @@
   async function runBackfill(store: StoreStatus) {
     store.backfilling = true;
     store.error = '';
-    
+
     try {
-      await api('POST', `/api/retailers/${store.id}/catalog/backfill-ai-tags`);
+      const res = await api('POST', `/api/retailers/${store.id}/catalog/backfill-ai-tags`);
       store.backfilling = false;
+
+      if (!res || res.queued === 0) {
+        store.error = 'No untagged products found. Products may already be tagged or not yet synced.';
+        return;
+      }
+
       store.backfillDone = true;
-      
-      // Refresh status after a short delay
+
+      // Refresh status after delay — tagging runs async so give it time
       setTimeout(async () => {
         try {
-          const res = await api('GET', `/api/retailers/${store.id}/catalog/ai-tags/status`);
-          if (res) {
-            store.total = res.total;
-            store.tagged = res.tagged;
+          const status = await api('GET', `/api/retailers/${store.id}/catalog/ai-tags/status`);
+          if (status) {
+            store.total = status.total;
+            store.tagged = status.tagged;
           }
         } catch {}
         store.backfillDone = false;
-      }, 3000);
+      }, 5000);
     } catch (e: any) {
       store.error = e.message || 'Backfill failed.';
       store.backfilling = false;
