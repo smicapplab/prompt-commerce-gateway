@@ -395,6 +395,22 @@ export class CatalogController {
     return { slug, synced, lastSyncedAt: lastSynced };
   }
 
+  // ── GET /api/stores/:slug/ai-tags ─────────────────────────────────────────
+  /**
+   * Returns AI-generated tags for all products in the store.
+   * Sellers use this to review what tags the gateway generated.
+   * Auth: x-gateway-key header.
+   */
+  @Get(':slug/ai-tags')
+  async getAiTags(
+    @Param('slug') slug: string,
+    @Headers('x-gateway-key') platformKey: string,
+  ) {
+    await this.validateKey(slug, platformKey);
+    const products = await this.catalog.getAiTags(slug);
+    return { slug, products };
+  }
+
   // ── Shared: validate platform key → return retailer ──────────────────
   private async validateKey(slug: string, platformKey: string) {
     if (!platformKey) throw new UnauthorizedException('x-gateway-key header required.');

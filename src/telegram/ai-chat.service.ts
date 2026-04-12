@@ -25,9 +25,12 @@ export interface StoreAiConfig {
 
 // ─── Structured chat result (text + optional product buttons) ────────────────
 export interface ProductButton {
-  id:    number;
+  id: number;
   title: string;
   price: number | null;
+  description?: string | null;
+  stockQuantity?: number | null;
+  images?: string[];
 }
 
 export interface ChatResult {
@@ -312,7 +315,12 @@ export class AiChatService {
             const list: any[] = Array.isArray(parsed) ? parsed : (parsed.products ?? []);
             if (list.length) {
               capturedProducts = list.map((p: any) => ({
-                id: p.id, title: p.title, price: p.price ?? null,
+                id:            p.id,
+                title:         p.title,
+                price:         p.price ?? null,
+                description:   p.description ?? null,
+                stockQuantity: p.stock ?? p.stockQuantity ?? null,
+                images:        Array.isArray(p.images) ? p.images : [],
               }));
             }
           } catch { /* not JSON */ }
@@ -399,7 +407,12 @@ export class AiChatService {
             const list: any[] = Array.isArray(parsed) ? parsed : (parsed.products ?? []);
             if (list.length) {
               capturedProducts = list.map((pr: any) => ({
-                id: pr.id, title: pr.title, price: pr.price ?? null,
+                id:            pr.id,
+                title:         pr.title,
+                price:         pr.price ?? null,
+                description:   pr.description ?? null,
+                stockQuantity: pr.stock ?? pr.stockQuantity ?? null,
+                images:        Array.isArray(pr.images) ? pr.images : [],
               }));
             }
           } catch { /* not JSON */ }
@@ -504,7 +517,12 @@ export class AiChatService {
             const list: any[] = Array.isArray(parsed) ? parsed : (parsed.products ?? []);
             if (list.length) {
               capturedProducts = list.map((p: any) => ({
-                id: p.id, title: p.title, price: p.price ?? null,
+                id:            p.id,
+                title:         p.title,
+                price:         p.price ?? null,
+                description:   p.description ?? null,
+                stockQuantity: p.stock ?? p.stockQuantity ?? null,
+                images:        Array.isArray(p.images) ? p.images : [],
               }));
             }
           } catch { /* not JSON */ }

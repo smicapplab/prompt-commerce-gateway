@@ -13,6 +13,7 @@ import { Type } from 'class-transformer';
 import { PRISMA } from '../prisma/prisma.module';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { parseSearchQuery } from './parse-search-query';
+import { TaggingService } from './tagging.service';
 
 export class SyncCategoryDto {
   @IsInt()
@@ -106,7 +107,10 @@ export class DeltaPayload {
 
 @Injectable()
 export class CatalogService {
-  constructor(@Inject(PRISMA) private readonly prisma: PrismaClient) {}
+  constructor(
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
+    private readonly tagging: TaggingService,
+  ) {}
 
   async getCategories(storeSlug: string) {
     return this.prisma.cachedCategory.findMany({
@@ -271,6 +275,7 @@ export class CatalogService {
           { description: { contains: word, mode: 'insensitive' as const } },
           { sku:         { contains: word, mode: 'insensitive' as const } },
           { tags:        { hasSome: [word.toLowerCase()] } },
+          { aiTags:      { hasSome: [word.toLowerCase()] } },
         ])
       : [];
 
@@ -302,6 +307,7 @@ export class CatalogService {
             { description: { contains: word, mode: 'insensitive' as const } },
             { sku:         { contains: word, mode: 'insensitive' as const } },
             { tags:        { has: word.toLowerCase() } },
+            { aiTags:      { has: word.toLowerCase() } },
           ],
         }))
       : undefined;
@@ -335,9 +341,21 @@ export class CatalogService {
     return row?.syncedAt ?? null;
   }
 
+  async getAiTags(storeSlug: string) {
+    return this.prisma.cachedProduct.findMany({
+      where: { storeSlug },
+      select: {
+        sellerId: true,
+        title: true,
+        aiTags: true,
+      },
+      orderBy: { title: 'asc' },
+    });
+  }
+
   // ── Delta Sync ───────────────────────────────────────────────────────────
   async delta(slug: string, payload: DeltaPayload) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // 1. Categories
       if (payload.delete?.categoryIds?.length) {
         await tx.cachedCategory.deleteMany({
@@ -394,11 +412,24 @@ export class CatalogService {
         products:   (payload.upsert?.products?.length   ?? 0) + (payload.delete?.productIds?.length   ?? 0),
       };
     });
+
+    // Non-blocking: generate AI tags for upserted products after sync succeeds
+    const upserted = payload.upsert?.products;
+    if (upserted?.length) {
+      // Fetch gateway IDs for the upserted seller IDs (needed for update by PK)
+      this.prisma.cachedProduct.findMany({
+        where: { storeSlug: slug, sellerId: { in: upserted.map(p => p.id) } },
+        select: { id: true, title: true, description: true, tags: true },
+      }).then(rows => this.tagging.generateAndSave(slug, rows))
+        .catch(() => {/* already logged inside TaggingService */});
+    }
+
+    return result;
   }
 
   // ── Full Snapshot Sync (Legacy) ──────────────────────────────────────────
   async fullSnapshot(slug: string, categories: SyncCategoryDto[], products: SyncProductDto[]) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // Wipe existing
       await tx.cachedProduct.deleteMany({ where: { storeSlug: slug } });
       await tx.cachedCategory.deleteMany({ where: { storeSlug: slug } });
@@ -435,5 +466,16 @@ export class CatalogService {
 
       return { categories: categories.length, products: products.length };
     });
+
+    // Non-blocking: generate AI tags for all synced products
+    if (products.length) {
+      this.prisma.cachedProduct.findMany({
+        where: { storeSlug: slug },
+        select: { id: true, title: true, description: true, tags: true },
+      }).then(rows => this.tagging.generateAndSave(slug, rows))
+        .catch(() => {/* already logged inside TaggingService */});
+    }
+
+    return result;
   }
 }

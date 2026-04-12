@@ -70,6 +70,7 @@ export function parseSearchQuery(raw: string): ParsedQuery {
   text = text
     .replace(/\b(find\s+me|show\s+me|i\s+want|i('m)?\s+(looking\s+for|need)|get\s+me|search\s+for|looking\s+for|give\s+me)\b/gi, '')
     .replace(/\b(a|an|the|some|any|please|cheap|cheapest|affordable)\b/gi, '')
+    .replace(/\b(for|with|color|colour|size|and)\b/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 

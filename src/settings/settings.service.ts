@@ -18,9 +18,12 @@ export class SettingsService implements OnApplicationBootstrap {
       { key: 'default_payment_provider', value: 'cod' },
       { key: 'default_payment_instructions', value: '' },
       { key: 'default_payment_link_template', value: '' },
-      { key: 'default_payment_label', value: 'Assisted Payment' },
-      { key: 'default_currency', value: 'PHP' },
-    ];
+      { key: 'default_payment_label',         value: 'Assisted Payment' },
+      { key: 'default_currency',              value: 'PHP' },
+      { key: 'gateway_ai_provider',           value: '' },
+      { key: 'gateway_ai_api_key',            value: '' },
+      { key: 'gateway_ai_model',              value: '' },
+      ];
 
     for (const { key, value } of defaults) {
       await this.prisma.setting.upsert({

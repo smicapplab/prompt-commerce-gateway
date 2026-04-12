@@ -25,6 +25,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KeysService } from '../keys/keys.service';
 import { IsBoolean, IsOptional } from 'class-validator';
 import { RegistryService, RegisterRetailerDto, UpdateRetailerDto, sanitizeRetailer } from './registry.service';
+import { TaggingService } from '../catalog/tagging.service';
 
 class UpdateStoreConfigDto {
   @IsOptional()
@@ -154,6 +155,7 @@ export class StoresController {
 export class RetailersController {
   constructor(
     private readonly registry: RegistryService,
+    private readonly tagging: TaggingService,
   ) { }
 
   /** GET /api/retailers */
@@ -210,5 +212,20 @@ export class RetailersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   revokeKey(@Param('id', ParseIntPipe) id: number) {
     return this.registry.revokeKey(id);
+  }
+
+  /**
+   * POST /api/retailers/:id/catalog/backfill-ai-tags
+   * Admin-only. Queues AI tag generation for all untagged products in this retailer's store.
+   * Returns immediately; tagging runs in background.
+   */
+  @Post(':id/catalog/backfill-ai-tags')
+  async backfillAiTags(@Param('id', ParseIntPipe) id: number) {
+    const retailer = await this.registry.findById(id);
+    const result = await this.tagging.backfill(retailer.slug);
+    return {
+      message: `AI tag backfill queued for "${retailer.slug}".`,
+      queued: result.queued,
+    };
   }
 }

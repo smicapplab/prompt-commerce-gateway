@@ -417,7 +417,12 @@ export class WhatsAppService implements OnModuleInit {
 
         // 2. If AI returned products, show as cards (matching Telegram UX)
         if (result.products && result.products.length > 0) {
-          await this.sendSearchCards(waId, result.products as any[], session.storeSlug, {
+          // sendSearchCards uses product.sellerId for button IDs; AI captures 'id' — remap.
+          const mappedProducts = result.products.map(p => ({
+            ...p,
+            sellerId: p.id
+          }));
+          await this.sendSearchCards(waId, mappedProducts as any[], session.storeSlug, {
             query: text,
             cartCount,
             totalResults: result.products.length,

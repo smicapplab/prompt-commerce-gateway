@@ -20,7 +20,7 @@ import { buildAiChatFooter } from '../shared/ai-chat-shell';
 import { AddressPickerService } from '../address-picker/address-picker.service';
 import { CB, storeListKeyboard, storeMenuKeyboard, categoryKeyboard,
          productListKeyboard, productDetailKeyboard, productDetailSearchKeyboard, productDetailAiKeyboard,
-         cartKeyboard, emptyCartKeyboard, aiModeKeyboard, aiProductKeyboard,
+         cartKeyboard, emptyCartKeyboard, aiModeKeyboard,
          backKeyboard, quantityKeyboard } from './keyboards';
 import { esc, price, productDetail, cartSummary, orderConfirmation,
          welcomeMessage, storeMenuMessage } from './formatters';
@@ -1597,11 +1597,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const cartCount = (await this.cartService.get(userId, storeSlug)).length;
       const shell = buildAiChatFooter(storeSlug, store.name, 'telegram', cartCount);
 
-      const keyboard = result.products?.length
-        ? aiProductKeyboard(storeSlug, result.products as any, cartCount)
-        : shell.telegramKeyboard;
+      // Always send the AI text with navigation footer first
+      await ctx.reply(result.text, { parse_mode: 'HTML', reply_markup: shell.telegramKeyboard });
 
-      await ctx.reply(result.text, { parse_mode: 'HTML', reply_markup: keyboard });
+      // If AI found products, render each one as a full photo card (same as regular search)
+      if (result.products?.length) {
+        await this.sendAiProductCards(ctx, userId, storeSlug, result.products);
+      }
 
       // AI reply logging is handled inside AiChatService.chat()
     } catch (err) {
@@ -1610,6 +1612,62 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         'Sorry, I\'m having trouble right now. Please try again in a moment.',
         { reply_markup: aiModeKeyboard(storeSlug) },
       );
+    }
+  }
+
+  /**
+   * Renders AI-found products as individual photo cards, matching the regular
+   * search UX. Uses productDetailAiKeyboard so "Back" returns to AI chat.
+   */
+  private async sendAiProductCards(
+    ctx: any,
+    userId: string,
+    storeSlug: string,
+    products: Array<{
+      id: number;
+      title: string;
+      price: number | null;
+      description?: string | null;
+      stockQuantity?: number | null;
+      images?: string[];
+    }>,
+  ): Promise<void> {
+    for (const p of products) {
+      const cartQty = await this.cartService.getItemQty(userId, storeSlug, p.id).catch(() => 0);
+      const addLabel = cartQty > 0 ? `🛒 Add More (${cartQty})` : '🛒 Add to Cart';
+
+      const caption = this.catalogFormatter.productCard(
+        {
+          title:         p.title,
+          price:         p.price,
+          stockQuantity: p.stockQuantity ?? null,
+          description:   p.description ?? null,
+        },
+        'html',
+      );
+
+      const keyboard = new InlineKeyboard()
+        .text(addLabel,      CB.qty(storeSlug, p.id))
+        .text('📋 Details',  CB.prod(storeSlug, p.id));
+
+      // Resolve image: use first image from captured data if available
+      const imageUrl = Array.isArray(p.images) && p.images.length
+        ? p.images[0]
+        : await this.browsing.resolveImageUrl(p as any, storeSlug).catch(() => null);
+
+      if (imageUrl?.startsWith('http')) {
+        try {
+          await ctx.replyWithPhoto(imageUrl, {
+            caption,
+            parse_mode: 'HTML',
+            reply_markup: keyboard,
+          });
+          continue;
+        } catch {
+          // Image send failed — fall through to text card
+        }
+      }
+      await ctx.reply(caption, { parse_mode: 'HTML', reply_markup: keyboard });
     }
   }
 
