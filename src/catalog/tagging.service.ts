@@ -112,10 +112,15 @@ PRODUCTS TO TAG:
 ${productList}
 
 Rules:
-- Generate 5–15 lowercase tags per product
+- Generate 8–20 tags per product
+- CRITICAL: Each tag MUST be a single lowercase word. NO spaces allowed in tags.
+- Use hyphens for compound concepts: "fried-chicken" not "fried chicken", "family-friendly" not "family friendly", "high-top" not "high top"
 - Tags must describe what the product IS, what it's FOR, who uses it, materials, flavors, destinations, etc. — whatever is relevant for this domain
 - Be domain-agnostic: for shoes use activity/type tags; for food use ingredients/cuisine; for electronics use use-case/compatibility; for airlines use route/class/airline
-- Include synonyms and related terms users might search (e.g., for "Nike Air Jordan 1": ["basketball", "sneakers", "high-top", "retro", "streetwear", "men", "sports"])
+- Include synonyms and related terms users might search. Example for "Nike Air Jordan 1": ["basketball", "sneakers", "high-top", "retro", "streetwear", "men", "sports", "jordan", "nike", "shoes"]
+- Example for "Chickenjoy": ["chicken", "fried-chicken", "crispy", "jollibee", "fast-food", "meal", "poultry", "comfort", "savory", "filipino"]
+- Include individual component words too: if product is "Jolly Spaghetti", include both "spaghetti" and "pasta" and "jolly" as separate tags
+- Do NOT use multi-word tags with spaces — split them into individual words or hyphenate
 - Do NOT repeat words already in the title unless they are semantically important synonyms
 - Return ONLY valid JSON object where keys are the indices [0], [1], etc. and values are arrays of strings.
 - Format: { "0": ["tag1","tag2"], "1": ["tag1","tag2"], ... }`;
