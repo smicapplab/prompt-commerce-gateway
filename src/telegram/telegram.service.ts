@@ -1597,8 +1597,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const cartCount = (await this.cartService.get(userId, storeSlug)).length;
       const shell = buildAiChatFooter(storeSlug, store.name, 'telegram', cartCount);
 
-      // Always send the AI text with navigation footer first
-      await ctx.reply(result.text, { parse_mode: 'HTML', reply_markup: shell.telegramKeyboard });
+      // When product cards follow, ensure the text is a short intro (not a full product listing).
+      // If the AI ignored the system prompt instruction, fall back to a generic intro.
+      const replyText = result.products?.length
+        ? (result.text?.trim() || `Here are some results I found:`)
+        : result.text;
+
+      await ctx.reply(replyText, { parse_mode: 'HTML', reply_markup: shell.telegramKeyboard });
 
       // If AI found products, render each one as a full photo card (same as regular search)
       if (result.products?.length) {
