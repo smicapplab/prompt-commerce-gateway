@@ -1597,17 +1597,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const cartCount = (await this.cartService.get(userId, storeSlug)).length;
       const shell = buildAiChatFooter(storeSlug, store.name, 'telegram', cartCount);
 
-      // When product cards follow, ensure the text is a short intro (not a full product listing).
-      // If the AI ignored the system prompt instruction, fall back to a generic intro.
-      const replyText = result.products?.length
-        ? (result.text?.trim() || `Here are some results I found:`)
-        : result.text;
-
-      await ctx.reply(replyText, { parse_mode: 'HTML', reply_markup: shell.telegramKeyboard });
-
-      // If AI found products, render each one as a full photo card (same as regular search)
       if (result.products?.length) {
-        await this.sendAiProductCards(ctx, userId, storeSlug, result.products);
+        // Products found: skip AI prose, show cards only.
+        // Nav footer is appended to the last card so the user still has Cart/Back to Store.
+        await this.sendAiProductCards(ctx, userId, storeSlug, result.products, shell.telegramKeyboard);
+      } else {
+        // No products: show full AI text with nav footer
+        await ctx.reply(result.text, { parse_mode: 'HTML', reply_markup: shell.telegramKeyboard });
       }
 
       // AI reply logging is handled inside AiChatService.chat()
@@ -1636,8 +1632,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       stockQuantity?: number | null;
       images?: string[];
     }>,
+    footerKeyboard?: { inline_keyboard: any[][] },
   ): Promise<void> {
-    for (const p of products) {
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      const isLast = i === products.length - 1;
+
       const cartQty = await this.cartService.getItemQty(userId, storeSlug, p.id).catch(() => 0);
       const addLabel = cartQty > 0 ? `🛒 Add More (${cartQty})` : '🛒 Add to Cart';
 
@@ -1651,9 +1651,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         'html',
       );
 
-      const keyboard = new InlineKeyboard()
-        .text(addLabel,      CB.qty(storeSlug, p.id))
-        .text('📋 Details',  CB.prod(storeSlug, p.id));
+      // On the last card, append the nav footer rows so the user has Cart/Back to Store
+      const cardRows: any[][] = [
+        [
+          { text: addLabel,      callback_data: CB.qty(storeSlug, p.id) },
+          { text: '📋 Details',  callback_data: CB.prod(storeSlug, p.id) },
+        ],
+        ...(isLast && footerKeyboard ? footerKeyboard.inline_keyboard : []),
+      ];
+      const reply_markup = { inline_keyboard: cardRows };
 
       // Resolve image: use first image from captured data if available
       const imageUrl = Array.isArray(p.images) && p.images.length
@@ -1662,17 +1668,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       if (imageUrl?.startsWith('http')) {
         try {
-          await ctx.replyWithPhoto(imageUrl, {
-            caption,
-            parse_mode: 'HTML',
-            reply_markup: keyboard,
-          });
+          await ctx.replyWithPhoto(imageUrl, { caption, parse_mode: 'HTML', reply_markup });
           continue;
         } catch {
           // Image send failed — fall through to text card
         }
       }
-      await ctx.reply(caption, { parse_mode: 'HTML', reply_markup: keyboard });
+      await ctx.reply(caption, { parse_mode: 'HTML', reply_markup });
     }
   }
 

@@ -410,14 +410,10 @@ export class WhatsAppService implements OnModuleInit {
           'whatsapp'
         );
 
-        // When product cards follow, ensure the text is a short intro (not a full product listing).
-        // If the AI ignored the system prompt instruction, fall back to a generic intro.
-        const replyText = result.products?.length
-          ? (result.text?.trim() || `Here are some results I found:`)
-          : result.text;
-
-        // 1. Send AI text reply (short intro if cards follow, full text otherwise)
-        await this.client.sendText(waId, replyText);
+        // 1. Send AI text only when no product cards follow (cards replace prose)
+        if (!result.products?.length) {
+          await this.client.sendText(waId, result.text);
+        }
 
         const cartCount = (await this.cartService.get(cartUserId, session.storeSlug)).length;
 
