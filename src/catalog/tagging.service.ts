@@ -30,16 +30,27 @@ export class TaggingService {
    * @param products   The products to tag (must already be persisted in DB).
    */
   async generateAndSave(storeSlug: string, products: ProductInput[]): Promise<void> {
-    const [provider, apiKey, model] = await Promise.all([
+    this.logger.log(`[Tagging] Starting tag generation for ${products.length} products in "${storeSlug}"`);
+
+    const [provider, apiKey, rawModel] = await Promise.all([
       this.settings.get('gateway_ai_provider'),
       this.settings.get('gateway_ai_api_key'),
       this.settings.get('gateway_ai_model'),
     ]);
 
     if (!provider || !apiKey) {
-      this.logger.debug('No gateway AI configured — skipping tag generation');
+      this.logger.warn(`[Tagging] Missing gateway AI configuration (Provider: ${provider}, API Key: ${!!apiKey}). Skipping.`);
       return;
     }
+
+    // Common typo fix: gpt-40-mini -> gpt-4o-mini
+    let model = rawModel || '';
+    if (provider === 'openai' && model === 'gpt-40-mini') {
+      this.logger.warn(`[Tagging] Detected typo "gpt-40-mini", correcting to "gpt-4o-mini"`);
+      model = 'gpt-4o-mini';
+    }
+
+    this.logger.debug(`[Tagging] Using provider: ${provider}, model: ${model || 'default'}`);
 
     // 3–5 random store products for domain inference context
     const contextProducts = await this.prisma.cachedProduct.findMany({
@@ -57,15 +68,22 @@ export class TaggingService {
       batches.push(products.slice(i, i + BATCH_SIZE));
     }
 
-    for (const batch of batches) {
+    this.logger.log(`[Tagging] Split into ${batches.length} batches`);
+
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
       try {
+        this.logger.debug(`[Tagging] Processing batch ${i + 1}/${batches.length}`);
         const tags = await this._callAi(provider, apiKey, model, batch, contextSnippet);
         await this._persist(batch, tags);
+        this.logger.debug(`[Tagging] Batch ${i + 1} completed and saved`);
       } catch (err: any) {
-        this.logger.error(`Tag generation batch failed for store "${storeSlug}": ${err?.message}`);
+        this.logger.error(`[Tagging] Batch ${i + 1} failed for store "${storeSlug}": ${err?.message}`);
         // Continue to next batch
       }
     }
+    
+    this.logger.log(`[Tagging] Completed tagging for store "${storeSlug}"`);
   }
 
   /**
@@ -99,23 +117,37 @@ Rules:
 - Be domain-agnostic: for shoes use activity/type tags; for food use ingredients/cuisine; for electronics use use-case/compatibility; for airlines use route/class/airline
 - Include synonyms and related terms users might search (e.g., for "Nike Air Jordan 1": ["basketball", "sneakers", "high-top", "retro", "streetwear", "men", "sports"])
 - Do NOT repeat words already in the title unless they are semantically important synonyms
-- Return ONLY valid JSON, no prose: { "0": ["tag1","tag2"], "1": ["tag1","tag2"], ... }`;
+- Return ONLY valid JSON object where keys are the indices [0], [1], etc. and values are arrays of strings.
+- Format: { "0": ["tag1","tag2"], "1": ["tag1","tag2"], ... }`;
 
     let responseText: string;
 
-    if (provider === 'claude') {
-      responseText = await this._callClaude(apiKey, model ?? 'claude-3-5-haiku-20241022', prompt);
-    } else if (provider === 'openai') {
-      responseText = await this._callOpenAi(apiKey, model ?? 'gpt-4o-mini', prompt);
-    } else if (provider === 'gemini') {
-      responseText = await this._callGemini(apiKey, model ?? 'gemini-1.5-flash', prompt);
-    } else {
-      throw new Error(`Unknown AI provider: ${provider}`);
+    try {
+      if (provider === 'claude') {
+        responseText = await this._callClaude(apiKey, model ?? 'claude-3-5-haiku-20241022', prompt);
+      } else if (provider === 'openai') {
+        responseText = await this._callOpenAi(apiKey, model ?? 'gpt-4o-mini', prompt);
+      } else if (provider === 'gemini') {
+        responseText = await this._callGemini(apiKey, model ?? 'gemini-1.5-flash', prompt);
+      } else {
+        throw new Error(`Unknown AI provider: ${provider}`);
+      }
+    } catch (apiErr: any) {
+      this.logger.error(`[Tagging] AI Provider API call failed: ${apiErr?.message}`);
+      throw apiErr;
     }
 
     // Strip markdown code fences that some models include despite instructions
     const cleaned = responseText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-    const parsed = JSON.parse(cleaned);
+    
+    let parsed: any;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (parseErr: any) {
+      this.logger.error(`[Tagging] Failed to parse AI JSON response: ${cleaned.slice(0, 200)}...`);
+      throw new Error(`Invalid JSON returned by AI: ${parseErr.message}`);
+    }
+
     const result = new Map<number, string[]>();
     for (const [key, tags] of Object.entries(parsed)) {
       const idx = parseInt(key, 10);
@@ -143,9 +175,10 @@ Rules:
     const OpenAI = (await import('openai')).default;
     const client = new OpenAI({ apiKey });
     const res = await client.chat.completions.create({
-      model,
+      model: model || 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1024,
+      response_format: { type: 'json_object' }, // Hard-enforce JSON
     });
     return res.choices[0]?.message?.content ?? '{}';
   }
@@ -182,11 +215,16 @@ Rules:
       select: { id: true, title: true, description: true, tags: true },
     });
 
-    if (!products.length) return { queued: 0 };
+    if (!products.length) {
+      this.logger.log(`[Tagging] No untagged products found for store "${storeSlug}".`);
+      return { queued: 0 };
+    }
+
+    this.logger.log(`[Tagging] Queuing backfill for ${products.length} products in "${storeSlug}"`);
 
     // Fire-and-forget — caller gets the count immediately
     this.generateAndSave(storeSlug, products).catch(err =>
-      this.logger.error(`Backfill failed for "${storeSlug}": ${err?.message}`),
+      this.logger.error(`[Tagging] Backfill background process failed for "${storeSlug}": ${err?.message}`),
     );
 
     return { queued: products.length };

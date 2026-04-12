@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { Sparkles, Check, Loader2, Info, Eye, EyeOff } from 'lucide-svelte';
-  import type { ApiFunction, Retailer } from '../../../shared/types';
+  import { Sparkles, Check, Loader2, Info, Eye, EyeOff, ChevronDown } from 'lucide-svelte';
+  import type { ApiFunction, Retailer } from '$shared/types';
   import { onMount } from 'svelte';
 
   let { api, retailers }: { api: ApiFunction; retailers: Retailer[] } = $props();
@@ -31,9 +31,33 @@
   let isLoadingStatuses = $state(true);
 
   const PROVIDERS = [
-    { id: 'claude', name: 'Claude', placeholder: 'claude-3-5-haiku-20241022' },
-    { id: 'openai', name: 'OpenAI', placeholder: 'gpt-4o-mini' },
-    { id: 'gemini', name: 'Gemini', placeholder: 'gemini-1.5-flash' },
+    { 
+      id: 'claude', 
+      name: 'Claude', 
+      models: [
+        { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Fast)' },
+        { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Best)' },
+        { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus' }
+      ]
+    },
+    { 
+      id: 'openai', 
+      name: 'OpenAI', 
+      models: [
+        { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Fast)' },
+        { id: 'gpt-4o', name: 'GPT-4o (Best)' },
+        { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' }
+      ]
+    },
+    { 
+      id: 'gemini', 
+      name: 'Gemini', 
+      models: [
+        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Fast)' },
+        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (Best)' },
+        { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Next Gen)' }
+      ]
+    },
   ];
 
   onMount(async () => {
@@ -44,13 +68,21 @@
   async function loadSettings() {
     try {
       const [pRes, kRes, mRes] = await Promise.all([
-        api('GET', '/api/settings/gateway_ai_provider'),
-        api('GET', '/api/settings/gateway_ai_api_key'),
-        api('GET', '/api/settings/gateway_ai_model'),
+        api('GET', '/settings/gateway_ai_provider'),
+        api('GET', '/settings/gateway_ai_api_key'),
+        api('GET', '/settings/gateway_ai_model'),
       ]);
       provider = pRes.value || 'claude';
       apiKeyHasValue = !!kRes.value;
-      model = mRes.value || '';
+      
+      const currentModel = mRes.value || '';
+      // Validate that the loaded model exists in our list for this provider
+      const providerConfig = PROVIDERS.find(p => p.id === provider);
+      if (providerConfig && providerConfig.models.some(m => m.id === currentModel)) {
+        model = currentModel;
+      } else if (providerConfig) {
+        model = providerConfig.models[0].id;
+      }
     } catch (e) {
       console.error('Failed to load AI tagging settings', e);
     }
@@ -74,7 +106,7 @@
     for (let i = 0; i < storeStatuses.length; i++) {
       const s = storeStatuses[i];
       try {
-        const res = await api('GET', `/api/retailers/${s.id}/catalog/ai-tags/status`);
+        const res = await api('GET', `/retailers/${s.id}/catalog/ai-tags/status`);
         s.total = res.total;
         s.tagged = res.tagged;
       } catch (e) {
@@ -84,17 +116,25 @@
     isLoadingStatuses = false;
   }
 
+  function handleProviderChange(id: string) {
+    provider = id;
+    const config = PROVIDERS.find(p => p.id === id);
+    if (config) {
+      model = config.models[0].id;
+    }
+  }
+
   async function saveConfig() {
     isSaving = true;
     savedMsg = '';
     saveError = '';
 
     try {
-      await api('PUT', '/api/settings/gateway_ai_provider', { value: provider });
-      await api('PUT', '/api/settings/gateway_ai_model', { value: model });
-
+      await api('PUT', '/settings/gateway_ai_provider', { value: provider });
+      await api('PUT', '/settings/gateway_ai_model', { value: model });
+      
       if (apiKeyInput.trim()) {
-        await api('PUT', '/api/settings/gateway_ai_api_key', { value: apiKeyInput.trim() });
+        await api('PUT', '/settings/gateway_ai_api_key', { value: apiKeyInput.trim() });
         apiKeyHasValue = true;
         apiKeyInput = '';
       }
@@ -113,14 +153,14 @@
     store.error = '';
     
     try {
-      await api('POST', `/api/retailers/${store.id}/catalog/backfill-ai-tags`);
+      await api('POST', `/retailers/${store.id}/catalog/backfill-ai-tags`);
       store.backfilling = false;
       store.backfillDone = true;
       
       // Refresh status after a short delay
       setTimeout(async () => {
         try {
-          const res = await api('GET', `/api/retailers/${store.id}/catalog/ai-tags/status`);
+          const res = await api('GET', `/retailers/${store.id}/catalog/ai-tags/status`);
           store.total = res.total;
           store.tagged = res.tagged;
         } catch {}
@@ -159,7 +199,7 @@
               {#each PROVIDERS as p}
                 <button
                   class="flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all duration-200 {provider === p.id ? 'bg-white text-purple-600 shadow-md ring-1 ring-purple-100' : 'text-gray-400 hover:text-gray-600'}"
-                  onclick={() => provider = p.id}
+                  onclick={() => handleProviderChange(p.id)}
                 >
                   {p.name}
                 </button>
@@ -171,13 +211,20 @@
             <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 ml-1" for="model">
               AI Model
             </label>
-            <input
-              id="model"
-              type="text"
-              bind:value={model}
-              placeholder={PROVIDERS.find(p => p.id === provider)?.placeholder}
-              class="w-full bg-gray-50 border-2 border-gray-50 rounded-2xl px-6 py-4 text-gray-900 font-medium focus:outline-none focus:border-purple-200 focus:bg-white transition-all placeholder:text-gray-300"
-            />
+            <div class="relative">
+              <select
+                id="model"
+                bind:value={model}
+                class="w-full appearance-none bg-gray-50 border-2 border-gray-50 rounded-2xl px-6 py-4 text-gray-900 font-bold focus:outline-none focus:border-purple-200 focus:bg-white transition-all cursor-pointer"
+              >
+                {#each PROVIDERS.find(p => p.id === provider)?.models || [] as m}
+                  <option value={m.id}>{m.name}</option>
+                {/each}
+              </select>
+              <div class="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                <ChevronDown size={20} />
+              </div>
+            </div>
           </div>
         </div>
 
