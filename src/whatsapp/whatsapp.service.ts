@@ -410,28 +410,39 @@ export class WhatsAppService implements OnModuleInit {
           'whatsapp'
         );
 
-        // 1. Send AI text only when no product cards follow (cards replace prose)
-        if (!result.products?.length) {
+        const cartCount = (await this.cartService.get(cartUserId, session.storeSlug)).length;
+
+        if (result.products?.length) {
+          // Products found: send each as a card (no pagination UI — this is AI chat, not catalog browse)
+          for (const p of result.products) {
+            const sellerId = p.id;
+            const imageUrl = await this.browsing.resolveImageUrl({ images: p.images }, session.storeSlug);
+            const priceStr = `₱${(p.price || 0).toLocaleString('en-PH')}`;
+            const stock = p.stockQuantity ?? 0;
+            const stockText = stock === 0 ? '❌ Out of stock' : stock <= 3 ? `⚠️ Only ${stock} left` : '✅ In stock';
+            const snippet = p.description ? '\n' + p.description.replace(/[\n\r]+/g, ' ').trim().slice(0, 200) : '';
+            const bodyText = `*${p.title}*\n${priceStr} · ${stockText}${snippet}`.substring(0, 1024);
+            const addLabel = cartCount > 0 ? `Add More (${cartCount})` : '🛒 Add to Cart';
+
+            const card: any = {
+              type: 'button',
+              body: { text: bodyText },
+              action: {
+                buttons: [
+                  { type: 'reply', reply: { id: `${WA_ACTION.QTY_SEL}:${session.storeSlug}:${sellerId}`, title: addLabel.substring(0, 20) } },
+                  { type: 'reply', reply: { id: `${WA_ACTION.PROD_SELECT}:${session.storeSlug}:${sellerId}`, title: '📋 Full Details' } },
+                ],
+              },
+            };
+            if (imageUrl) card.header = { type: 'image', image: { link: imageUrl } };
+            await this.client.sendInteractive(waId, card);
+          }
+        } else {
+          // No products: send AI text response
           await this.client.sendText(waId, result.text);
         }
 
-        const cartCount = (await this.cartService.get(cartUserId, session.storeSlug)).length;
-
-        // 2. If AI returned products, show as cards (matching Telegram UX)
-        if (result.products && result.products.length > 0) {
-          // sendSearchCards uses product.sellerId for button IDs; AI captures 'id' — remap.
-          const mappedProducts = result.products.map(p => ({
-            ...p,
-            sellerId: p.id
-          }));
-          await this.sendSearchCards(waId, mappedProducts as any[], session.storeSlug, {
-            query: text,
-            cartCount,
-            totalResults: result.products.length,
-          });
-        }
-
-        // 3. Always show AI chat footer/navigation (Issue 4c)
+        // Always show AI chat footer/navigation
         const shell = buildAiChatFooter(session.storeSlug, retailer.name, 'whatsapp', cartCount);
         if (shell.whatsAppButtons) {
           await this.client.sendInteractive(waId, shell.whatsAppButtons);
