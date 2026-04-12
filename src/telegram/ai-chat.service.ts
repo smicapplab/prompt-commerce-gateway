@@ -585,13 +585,17 @@ export class AiChatService {
         if (maxPrice != null) searchStr += ` under ${maxPrice}`;
 
         const limit = Math.min((args.limit as number) || 10, 50);
-        const products = await this.catalog.getProducts(retailer.slug, {
-          search: searchStr.trim() || undefined,
+
+        // Use smartSearch: AND strategy first (all keywords must match), OR fallback if 0 results.
+        // This handles queries like "basketball shoes" where no single product has both words
+        // in the same field — OR fallback catches products tagged "basketball" even without "shoes".
+        const { results: products, fallback } = await this.catalog.smartSearch(searchStr.trim(), {
           limit,
+          storeSlug: retailer.slug,
         });
 
         if (products.length > 0) {
-          this.logger.log(`[AiChat] Tool Success (Cache): ${toolName} found ${products.length} items in ${Date.now() - startTime}ms`);
+          this.logger.log(`[AiChat] Tool Success (Cache${fallback ? '/OR-fallback' : ''}): ${toolName} found ${products.length} items in ${Date.now() - startTime}ms`);
           return JSON.stringify({
             source: 'cache',
             products: products.map(p => ({
