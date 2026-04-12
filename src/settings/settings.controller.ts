@@ -18,6 +18,9 @@ const MUTABLE_SETTINGS = new Set([
   'telegram_bot_token',
   'google_places_api_key',
   'google_places_browser_key',
+  'gateway_ai_provider',
+  'gateway_ai_api_key',
+  'gateway_ai_model',
 ]);
 
 @UseGuards(JwtAuthGuard)

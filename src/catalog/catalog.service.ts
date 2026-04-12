@@ -353,6 +353,14 @@ export class CatalogService {
     });
   }
 
+  async getAiTagStats(storeSlug: string): Promise<{ total: number; tagged: number }> {
+    const [total, tagged] = await Promise.all([
+      this.prisma.cachedProduct.count({ where: { storeSlug } }),
+      this.prisma.cachedProduct.count({ where: { storeSlug, NOT: { aiTags: { equals: [] } } } }),
+    ]);
+    return { total, tagged };
+  }
+
   // ── Delta Sync ───────────────────────────────────────────────────────────
   async delta(slug: string, payload: DeltaPayload) {
     const result = await this.prisma.$transaction(async (tx) => {

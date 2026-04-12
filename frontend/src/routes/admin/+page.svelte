@@ -13,6 +13,7 @@
   import ChatLog from "$lib/components/admin/ChatLog.svelte";
   import SystemSettings from "$lib/components/admin/SystemSettings.svelte";
   import PaymentSettings from "$lib/components/admin/PaymentSettings.svelte";
+  import AiTaggingSettings from "$lib/components/admin/AiTaggingSettings.svelte";
   import DashboardToast from "$lib/components/admin/DashboardToast.svelte";
   import ConfirmModal from "$lib/components/admin/ConfirmModal.svelte";
 
@@ -155,7 +156,8 @@
       tab !== "settings" &&
       tab !== "payments" &&
       tab !== "orders" &&
-      tab !== "chat"
+      tab !== "chat" &&
+      tab !== "ai-tagging"
     ) {
       loadRetailers();
     }
@@ -197,7 +199,9 @@
                         ? "Network Order Dashboard"
                         : currentTab === "payments"
                           ? "Gateway Payments"
-                          : "Gateway Settings"}
+                          : currentTab === "ai-tagging"
+                            ? "AI Semantic Tagging"
+                            : "Gateway Settings"}
             </h1>
             <p class="text-gray-500 font-medium text-sm mt-2">
               {currentTab === "settings"
@@ -206,11 +210,13 @@
                   ? "Global default payment providers and offline instructions."
                   : currentTab === "chat"
                     ? "Monitor real-time conversations across all stores."
-                    : "Review and manage store certifications."}
+                    : currentTab === "ai-tagging"
+                      ? "Configure gateway AI provider and backfill semantic tags for all stores."
+                      : "Review and manage store certifications."}
             </p>
           </div>
 
-          {#if currentTab !== "settings" && currentTab !== "payments"}
+          {#if currentTab !== "settings" && currentTab !== "payments" && currentTab !== "ai-tagging"}
             <button
               onclick={loadRetailers}
               class="p-3 bg-white border border-gray-200 rounded-2xl text-gray-400 hover:text-gray-900 transition-all shadow-sm hover:shadow-lg active:scale-90"
@@ -226,6 +232,8 @@
           <SystemSettings {api} />
         {:else if currentTab === "payments"}
           <PaymentSettings {api} />
+        {:else if currentTab === "ai-tagging"}
+          <AiTaggingSettings {api} {retailers} />
         {:else if currentTab === "orders"}
           <OrderDashboard {api} {retailers} />
         {:else if currentTab === "chat"}

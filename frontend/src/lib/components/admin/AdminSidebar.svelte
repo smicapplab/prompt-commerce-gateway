@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ShieldAlert, ShieldCheck, Users, MessageSquare, ShoppingBag, Settings, CreditCard, LogOut } from "lucide-svelte";
+  import { ShieldAlert, ShieldCheck, Users, MessageSquare, ShoppingBag, Settings, CreditCard, LogOut, Sparkles } from "lucide-svelte";
   import type { Retailer, AdminTabId } from "$shared/types";
 
   let { currentTab, switchTab, retailers, logout } = $props<{
@@ -78,6 +78,15 @@
         : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
     >
       <Settings size={22} strokeWidth={2.5} /> Settings
+    </button>
+
+    <button
+      onclick={() => switchTab("ai-tagging")}
+      class="flex items-center gap-4 px-5 py-3 rounded-2xl transition-all text-sm {currentTab === 'ai-tagging'
+        ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 font-black'
+        : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 font-bold'}"
+    >
+      <Sparkles size={22} strokeWidth={2.5} /> AI Tagging
     </button>
 
     <button

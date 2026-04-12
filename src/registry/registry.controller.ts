@@ -26,6 +26,7 @@ import { KeysService } from '../keys/keys.service';
 import { IsBoolean, IsOptional } from 'class-validator';
 import { RegistryService, RegisterRetailerDto, UpdateRetailerDto, sanitizeRetailer } from './registry.service';
 import { TaggingService } from '../catalog/tagging.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 class UpdateStoreConfigDto {
   @IsOptional()
@@ -156,6 +157,7 @@ export class RetailersController {
   constructor(
     private readonly registry: RegistryService,
     private readonly tagging: TaggingService,
+    private readonly catalog: CatalogService,
   ) { }
 
   /** GET /api/retailers */
@@ -227,5 +229,15 @@ export class RetailersController {
       message: `AI tag backfill queued for "${retailer.slug}".`,
       queued: result.queued,
     };
+  }
+
+  /**
+   * GET /api/retailers/:id/catalog/ai-tags/status
+   * Returns how many products have AI tags generated vs total products.
+   */
+  @Get(':id/catalog/ai-tags/status')
+  async getAiTagStatus(@Param('id', ParseIntPipe) id: number) {
+    const retailer = await this.registry.findById(id);
+    return this.catalog.getAiTagStats(retailer.slug);
   }
 }

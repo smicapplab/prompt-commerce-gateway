@@ -229,7 +229,8 @@ export type AdminTabId =
   | 'chat'
   | 'payments'
   | 'orders'
-  | 'settings';
+  | 'settings'
+  | 'ai-tagging';
 
 // The admin `api()` helper returns parsed JSON — typed as any since each
 // call site knows what shape to expect.
