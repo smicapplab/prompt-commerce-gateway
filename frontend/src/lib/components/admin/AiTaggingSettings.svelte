@@ -68,14 +68,14 @@
   async function loadSettings() {
     try {
       const [pRes, kRes, mRes] = await Promise.all([
-        api('GET', '/settings/gateway_ai_provider'),
-        api('GET', '/settings/gateway_ai_api_key'),
-        api('GET', '/settings/gateway_ai_model'),
+        api('GET', '/api/settings/gateway_ai_provider'),
+        api('GET', '/api/settings/gateway_ai_api_key'),
+        api('GET', '/api/settings/gateway_ai_model'),
       ]);
-      provider = pRes.value || 'claude';
-      apiKeyHasValue = !!kRes.value;
+      provider = pRes?.value || 'claude';
+      apiKeyHasValue = !!(kRes && kRes.value);
       
-      const currentModel = mRes.value || '';
+      const currentModel = mRes?.value || '';
       // Validate that the loaded model exists in our list for this provider
       const providerConfig = PROVIDERS.find(p => p.id === provider);
       if (providerConfig && providerConfig.models.some(m => m.id === currentModel)) {
@@ -106,9 +106,11 @@
     for (let i = 0; i < storeStatuses.length; i++) {
       const s = storeStatuses[i];
       try {
-        const res = await api('GET', `/retailers/${s.id}/catalog/ai-tags/status`);
-        s.total = res.total;
-        s.tagged = res.tagged;
+        const res = await api('GET', `/api/retailers/${s.id}/catalog/ai-tags/status`);
+        if (res) {
+          s.total = res.total;
+          s.tagged = res.tagged;
+        }
       } catch (e) {
         console.error(`Failed to load status for ${s.slug}`, e);
       }
@@ -130,11 +132,11 @@
     saveError = '';
 
     try {
-      await api('PUT', '/settings/gateway_ai_provider', { value: provider });
-      await api('PUT', '/settings/gateway_ai_model', { value: model });
+      await api('PUT', '/api/settings/gateway_ai_provider', { value: provider });
+      await api('PUT', '/api/settings/gateway_ai_model', { value: model });
       
       if (apiKeyInput.trim()) {
-        await api('PUT', '/settings/gateway_ai_api_key', { value: apiKeyInput.trim() });
+        await api('PUT', '/api/settings/gateway_ai_api_key', { value: apiKeyInput.trim() });
         apiKeyHasValue = true;
         apiKeyInput = '';
       }
@@ -153,16 +155,18 @@
     store.error = '';
     
     try {
-      await api('POST', `/retailers/${store.id}/catalog/backfill-ai-tags`);
+      await api('POST', `/api/retailers/${store.id}/catalog/backfill-ai-tags`);
       store.backfilling = false;
       store.backfillDone = true;
       
       // Refresh status after a short delay
       setTimeout(async () => {
         try {
-          const res = await api('GET', `/retailers/${store.id}/catalog/ai-tags/status`);
-          store.total = res.total;
-          store.tagged = res.tagged;
+          const res = await api('GET', `/api/retailers/${store.id}/catalog/ai-tags/status`);
+          if (res) {
+            store.total = res.total;
+            store.tagged = res.tagged;
+          }
         } catch {}
         store.backfillDone = false;
       }, 3000);
