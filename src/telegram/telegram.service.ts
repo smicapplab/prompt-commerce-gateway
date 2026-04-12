@@ -1463,7 +1463,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       // 4. Notify seller if configured
       if (retailer.telegramNotifyChatId && this.bot) {
         try {
-          const itemLines = items.map(i => `• ${i.title} × ${i.quantity} = ${price(i.price * i.quantity)}`).join('\n');
+          const itemLines = items.map((i: any) => `• ${i.title} × ${i.quantity} = ${price(i.price * i.quantity)}`).join('\n');
           const notifyMsg = 
             `🔔 <b>New Order #${orderId}</b>\n\n` +
             `<b>Store:</b> ${esc(retailer.name)}\n` +

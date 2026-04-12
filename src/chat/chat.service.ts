@@ -63,11 +63,13 @@ export class ChatService {
   }
 
   async getRecentMessages(conversationId: number, limit = 20) {
-    return this.prisma.message.findMany({
+    const messages = await this.prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
+    // Reverse so messages are chronological (oldest first) for AI context / UI display
+    return messages.reverse();
   }
 
   async updateConversation(id: number, data: { mode?: string; assignedTo?: string }) {

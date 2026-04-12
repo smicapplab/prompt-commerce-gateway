@@ -218,7 +218,6 @@ export class AiChatService {
       // Convert to neutral HistoryMessage format
       history = msgs
         .filter(m => m.senderType === 'buyer' || m.senderType === 'ai')
-        .reverse() // getRecentMessages returns desc, we need asc
         .map(m => ({
           role: m.senderType === 'buyer' ? 'user' : 'assistant',
           content: m.body,

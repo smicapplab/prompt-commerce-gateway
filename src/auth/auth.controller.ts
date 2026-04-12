@@ -1,37 +1,13 @@
 import {
   Controller, Post, Get, Body, Req, Res,
-  HttpCode, HttpStatus, UseGuards, UnauthorizedException,
+  HttpCode, HttpStatus, UseGuards, UnauthorizedException, Inject,
 } from '@nestjs/common';
 import { IsString, IsNotEmpty } from 'class-validator';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
-
-// ── SEC-B: In-memory login rate limiter ───────────────────────────────────────
-// 10 attempts per IP per 15-minute window.
-interface RateLimitEntry { count: number; resetAt: number }
-const loginAttempts = new Map<string, RateLimitEntry>();
-const LOGIN_LIMIT = 10;
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-
-// Prune stale entries every 30 minutes to prevent unbounded growth.
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of loginAttempts) {
-    if (now > entry.resetAt) loginAttempts.delete(key);
-  }
-}, 30 * 60 * 1000).unref();
-
-function checkLoginRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = loginAttempts.get(ip);
-  if (!entry || now > entry.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
-    return false; // not limited
-  }
-  entry.count++;
-  return entry.count > LOGIN_LIMIT;
-}
+import { PRISMA } from '../prisma/prisma.module';
+import { PrismaClient } from '@prisma/client';
 
 // ── Cookie config ─────────────────────────────────────────────────────────────
 const COOKIE_NAME = 'gw_token';
@@ -59,9 +35,40 @@ class LoginDto {
 
 @Controller('api/auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    @Inject(PRISMA) private readonly prisma: PrismaClient,
+  ) { }
 
-  /** POST /api/auth/login — issues JWT as httpOnly cookie + body for backward compat */
+  private async checkLoginRateLimit(ip: string): Promise<boolean> {
+    const key = `login_rate_limit:${ip}`;
+    const limit = 10;
+    const windowMs = 15 * 60 * 1000; // 15 minutes
+    const now = new Date();
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const record = await tx.rateLimit.findUnique({ where: { key } });
+
+        if (!record || now > record.resetAt) {
+          await tx.rateLimit.upsert({
+            where: { key },
+            create: { key, count: 1, resetAt: new Date(now.getTime() + windowMs) },
+            update: { count: 1, resetAt: new Date(now.getTime() + windowMs) },
+          });
+          return false;
+        }
+
+        await tx.$executeRaw`UPDATE rate_limits SET count = count + 1 WHERE key = ${key}`;
+        const updated = await tx.rateLimit.findUnique({ where: { key } });
+        return (updated?.count ?? 0) > limit;
+      });
+    } catch {
+      return false; // Fail open — don't block logins if DB is down
+    }
+  }
+
+  /** POST /api/auth/login — issues JWT as httpOnly cookie */
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -71,7 +78,7 @@ export class AuthController {
   ) {
     // SEC-B: Rate-limit login attempts per IP
     const ip = (req.ip ?? req.socket.remoteAddress ?? 'unknown');
-    if (checkLoginRateLimit(ip)) {
+    if (await this.checkLoginRateLimit(ip)) {
       throw new UnauthorizedException('Too many login attempts. Try again in 15 minutes.');
     }
 
@@ -80,8 +87,7 @@ export class AuthController {
     // SEC-A: Set JWT as httpOnly cookie so it cannot be read by JavaScript
     res.cookie(COOKIE_NAME, result.access_token, setCookieOptions());
 
-    // Also return the token in the body for backward compat with API clients
-    return result;
+    return { message: 'Authenticated.' };
   }
 
   /** POST /api/auth/logout — clears the session cookie */

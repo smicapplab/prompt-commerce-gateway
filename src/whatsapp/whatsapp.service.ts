@@ -331,7 +331,7 @@ export class WhatsAppService implements OnModuleInit {
 
         // 4. Notify seller if configured
         if (retailer.whatsappNotifyNumber) {
-          const itemLines = items.map(i => `• ${i.title} × ${i.quantity} = ₱${(i.price * i.quantity).toLocaleString()}`).join('\n');
+          const itemLines = items.map((i: any) => `• ${i.title} × ${i.quantity} = ₱${(i.price * i.quantity).toLocaleString()}`).join('\n');
           const notifyMsg =
             `🔔 *New Order #${orderId}*\n\n` +
             `*Store:* ${retailer.name}\n` +

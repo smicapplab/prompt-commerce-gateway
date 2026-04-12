@@ -24,7 +24,7 @@ import path from 'path';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { KeysService } from '../keys/keys.service';
 import { IsBoolean, IsOptional } from 'class-validator';
-import { RegistryService, RegisterRetailerDto, UpdateRetailerDto } from './registry.service';
+import { RegistryService, RegisterRetailerDto, UpdateRetailerDto, sanitizeRetailer } from './registry.service';
 
 class UpdateStoreConfigDto {
   @IsOptional()
@@ -158,18 +158,20 @@ export class RetailersController {
 
   /** GET /api/retailers */
   @Get()
-  findAll() {
-    return this.registry.findAll();
+  async findAll() {
+    const retailers = await this.registry.findAll();
+    return retailers.map(sanitizeRetailer);
   }
 
   /** GET /api/retailers/:id */
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.registry.findById(id);
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const retailer = await this.registry.findById(id);
+    return sanitizeRetailer(retailer);
   }
 
   @Get(':id/audit-logs')
-  getAuditLogs(
+  async getAuditLogs(
     @Param('id', ParseIntPipe) id: number,
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
   ) {
@@ -178,11 +180,12 @@ export class RetailersController {
 
   /** PATCH /api/retailers/:id — verify, update URL, toggle active, etc. */
   @Patch(':id')
-  update(
+  async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateRetailerDto,
   ) {
-    return this.registry.update(id, dto);
+    const retailer = await this.registry.update(id, dto);
+    return sanitizeRetailer(retailer);
   }
 
   /** DELETE /api/retailers/:id */

@@ -25,6 +25,29 @@ export function isPrivateIp(ip: string): boolean {
 }
 
 /**
+ * Returns true if the IPv6 address falls in a private/loopback/link-local range.
+ */
+export function isPrivateIpv6(ip: string): boolean {
+  // Normalize: strip brackets (e.g. [::1] → ::1)
+  const normalized = ip.replace(/^\[|\]$/g, '').toLowerCase();
+
+  if (normalized === '::1') return true; // loopback
+  if (normalized === '::') return true;  // unspecified
+
+  // Link-local: fe80::/10
+  if (normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
+    normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
+
+  // Unique Local Address: fc00::/7 (fc:: and fd::)
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+
+  // Multicast: ff00::/8
+  if (normalized.startsWith('ff')) return true;
+
+  return false;
+}
+
+/**
  * Validates that a URL is safe from SSRF by checking its protocol and resolving
  * the hostname to ensure it doesn't point to a private IP range.
  * 
@@ -36,18 +59,23 @@ export async function isSsrfSafe(url: string): Promise<boolean> {
     const parsed = new URL(url);
     // Only allow http/https schemes
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-    
+
     // Block numeric IP hostnames that are private
     const host = parsed.hostname;
     // If it's already a dotted-decimal IPv4, check directly
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
       return !isPrivateIp(host);
     }
-    
+
+    // IPv6 literal check (URL parser strips brackets: [::1] → ::1)
+    if (host.includes(':')) {
+      return !isPrivateIpv6(host);
+    }
+
     // Resolve the hostname and check all returned IPs
     const addresses = await dns.resolve4(host).catch(() => [] as string[]);
     if (!addresses.length) return false; // unresolvable — block
-    
+
     return addresses.every(ip => !isPrivateIp(ip));
   } catch {
     return false;
@@ -65,6 +93,14 @@ export async function resolveSafeIp(hostname: string): Promise<string> {
       throw new Error(`SSRF blocked: ${hostname} is a private IP`);
     }
     return hostname;
+  }
+
+  // Block IPv6 literals
+  if (hostname.includes(':')) {
+    if (isPrivateIpv6(hostname)) {
+      throw new Error(`SSRF blocked: ${hostname} is a private IPv6 address`);
+    }
+    throw new Error(`IPv6 MCP server URLs are not supported`);
   }
 
   // Resolve the hostname and check all returned IPs
@@ -100,7 +136,7 @@ export async function safeFetch(url: string, init?: RequestInit): Promise<Respon
   };
 
   const agentOptions = { lookup };
-  const agent = parsed.protocol === 'https:' 
+  const agent = parsed.protocol === 'https:'
     ? new https.Agent(agentOptions)
     : new http.Agent(agentOptions);
 
@@ -117,7 +153,7 @@ export async function safeFetch(url: string, init?: RequestInit): Promise<Respon
     return new Promise((resolve, reject) => {
       const module = parsed.protocol === 'https:' ? https : http;
       const headers = init?.headers ? (init.headers as any) : {};
-      
+
       const req = module.request(url, {
         method: init?.method || 'GET',
         headers,

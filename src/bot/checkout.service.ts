@@ -19,7 +19,7 @@ export class CheckoutService {
     private readonly cartService: CartService,
     private readonly settings: SettingsService,
     @Optional() private readonly paymentService?: PaymentService,
-  ) {}
+  ) { }
 
   /**
    * Refreshes cart prices and returns a summary.
@@ -27,14 +27,14 @@ export class CheckoutService {
    */
   async getOrderSummary(userId: string, storeSlug: string, channel: 'telegram' | 'whatsapp') {
     const cartUserId = channel === 'whatsapp' ? `wa:${userId}` : userId;
-    
+
     // 1. Validate prices
     const { changed, oldTotal, newTotal } = await this.cartService.validateCartPrices(cartUserId, storeSlug);
-    
+
     // 2. Get items
     const items = await this.cartService.get(cartUserId, storeSlug);
     const total = await this.cartService.total(cartUserId, storeSlug);
-    
+
     return {
       items,
       total,
@@ -51,7 +51,7 @@ export class CheckoutService {
   async placeOrder(userId: string, state: CheckoutState, channel: 'telegram' | 'whatsapp') {
     const { storeSlug } = state;
     const cartUserId = channel === 'whatsapp' ? `wa:${userId}` : userId;
-    
+
     const items = await this.cartService.get(cartUserId, storeSlug);
     const retailer = await this.registry.findBySlug(storeSlug);
 
@@ -98,7 +98,7 @@ export class CheckoutService {
     const content = mcpRes.content || [];
     let orderId = 0;
 
-    // Parse order_id from MCP response
+    // Parse order_id from MCP response — try JSON first, then regex fallback
     for (const item of content) {
       if (item.type === 'text' && item.text?.startsWith('{')) {
         try {
@@ -107,78 +107,97 @@ export class CheckoutService {
             orderId = parsed.order_id;
             break;
           }
-        } catch (e) { /* not JSON */ }
+        } catch { /* not JSON */ }
       }
     }
 
     if (!orderId) {
-      const resultText: string = content.find(c => c.type === 'text')?.text ?? '';
+      const resultText: string = content.find((c: any) => c.type === 'text')?.text ?? '';
       const match = resultText.match(/Order #(\d+)/);
-      if (match) orderId = parseInt(match[1]);
+      if (match) orderId = parseInt(match[1], 10);
     }
 
     if (!orderId) {
-      this.logger.error(`Order creation response missing ID: ${JSON.stringify(mcpRes)}`);
+      this.logger.error(
+        `[ORDER ID PARSE FAILURE] Could not extract order_id from MCP response. ` +
+        `Store: ${storeSlug}, Buyer: ${userId}. ` +
+        `Full MCP response: ${JSON.stringify(mcpRes).slice(0, 1000)}`,
+      );
       throw new Error('Order creation failed on seller server.');
     }
 
     // 2. Wrap local gateway operations in a transaction
-    return await this.prisma.$transaction(async (tx) => {
-      // Clear cart
-      await this.cartService.clear(cartUserId, storeSlug);
+    let result: any;
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        // Update user profile info ONLY (no cart clear here)
+        const nameParts = (state.name || '').split(' ');
+        const fName = nameParts[0] || '';
+        const lName = nameParts.slice(1).join(' ') || '';
 
-      // Update user profile info
-      const nameParts = (state.name || '').split(' ');
-      const fName = nameParts[0] || '';
-      const lName = nameParts.slice(1).join(' ') || '';
+        if (channel === 'telegram') {
+          await tx.telegramUser.update({
+            where: { id: userId },
+            data: {
+              lastOrderAt: new Date(),
+              savedFirstName: fName,
+              savedLastName: lName,
+              savedEmail: state.email,
+            },
+          });
+        } else {
+          await tx.whatsAppUser.update({
+            where: { id: userId },
+            data: {
+              lastOrderAt: new Date(),
+              savedFirstName: fName,
+              savedLastName: lName,
+              savedEmail: state.email,
+            },
+          });
+        }
 
-      if (channel === 'telegram') {
-        await tx.telegramUser.update({
-          where: { id: userId },
-          data: { 
-            lastOrderAt: new Date(),
-            savedFirstName: fName,
-            savedLastName: lName,
-            savedEmail: state.email,
-          },
-        });
-      } else {
-        await tx.whatsAppUser.update({
-          where: { id: userId },
-          data: { 
-            lastOrderAt: new Date(),
-            savedFirstName: fName,
-            savedLastName: lName,
-            savedEmail: state.email,
-          },
-        });
-      }
+        // 3. Initiate Payment on Gateway
+        let payment = null;
+        if (this.paymentService) {
+          const baseUrl = (await this.settings.get('gateway_public_url')) || 'http://localhost:3002';
 
-      // 3. Initiate Payment on Gateway
-      let payment = null;
-      if (this.paymentService) {
-        const baseUrl = (await this.settings.get('gateway_public_url')) || 'http://localhost:3002';
+          payment = await this.paymentService.initiatePayment({
+            orderId,
+            storeSlug,
+            buyerRef: userId,
+            amount: total,
+            description: `Order #${orderId} — ${storeSlug}`,
+            baseUrl,
+            providerOverride: state.paymentMethod || undefined,
+            buyerEmail: state.email
+          });
+        }
 
-        payment = await this.paymentService.initiatePayment({
+        return {
           orderId,
-          storeSlug,
-          buyerRef: userId,
-          amount: total,
-          description: `Order #${orderId} — ${storeSlug}`,
-          baseUrl,
-          providerOverride: state.paymentMethod || undefined,
-          buyerEmail: state.email
-        });
-      }
+          total,
+          retailer,
+          payment,
+          items
+        };
+      });
+    } catch (txErr) {
+      // CRITICAL: Seller order was already created on the MCP server (orderId: ${orderId})
+      // but the gateway transaction failed. This order is orphaned — manual reconciliation needed.
+      this.logger.error(
+        `[ORPHANED ORDER] Seller order #${orderId} created on ${storeSlug} MCP server ` +
+        `but gateway transaction failed. Manual reconciliation required. ` +
+        `Buyer: ${userId}, Store: ${storeSlug}, Amount: ${total}. ` +
+        `Error: ${(txErr as Error).message}`,
+      );
+      throw txErr;
+    }
 
-      return {
-        orderId,
-        total,
-        retailer,
-        payment,
-        items
-      };
-    });
+    // 4. Clear cart AFTER transaction commits successfully
+    await this.cartService.clear(cartUserId, storeSlug);
+
+    return result;
   }
 
   /**
@@ -187,7 +206,7 @@ export class CheckoutService {
   async checkRateLimit(userId: string, platform: 'telegram' | 'whatsapp'): Promise<{ allowed: boolean; waitSec?: number }> {
     const thirtySecsAgo = new Date(Date.now() - 30_000);
     const table = platform === 'telegram' ? this.prisma.telegramUser : this.prisma.whatsAppUser;
-    
+
     const updated = await (table as any).updateMany({
       where: {
         id: userId,
@@ -206,7 +225,7 @@ export class CheckoutService {
         const waitSec = Math.ceil((30_000 - (Date.now() - lastAt)) / 1000);
         return { allowed: false, waitSec };
       }
-      return { allowed: true }; 
+      return { allowed: true };
     }
 
     return { allowed: true };
@@ -222,16 +241,16 @@ export class CheckoutService {
     label: string;
   }) {
     const { userId, platform, state, label } = params;
-    
+
     const province = state.province || '';
-    const city     = state.city     || '';
+    const city = state.city || '';
     const barangay = state.barangay || '';
 
     if (label && label !== 'skip') {
       const table = platform === 'telegram' ? this.prisma.telegramAddress : this.prisma.whatsAppAddress;
-      
+
       const count = await (table as any).count({ where: { userId } });
-      
+
       const record = await (table as any).create({
         data: {
           userId,

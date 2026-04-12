@@ -24,7 +24,9 @@ async function bootstrap(): Promise<void> {
   });
 
   // Enable 'trust proxy' so that req.ip is correct when behind a reverse proxy (e.g. Nginx, Cloudflare, Render)
-  app.set('trust proxy', true);
+  // Trust exactly one upstream proxy (e.g. Nginx or Render's edge).
+  // Increase to 2 if behind Cloudflare + Nginx.
+  app.set('trust proxy', 1);
 
   // SEC-A: Cookie parser must be registered before NestJS guards run
   app.use(cookieParser());

@@ -13,12 +13,32 @@ import {
   IsUrl,
   IsOptional,
   IsBoolean,
-  IsInt
 } from 'class-validator';
 import { PRISMA } from '../prisma/prisma.module';
 import { KeysService } from '../keys/keys.service';
 import { MailService } from '../mail/mail.service';
 import { isSsrfSafe } from '../utils/ssrf';
+
+const SECRET_FIELDS = [
+  'aiApiKey', 'serperApiKey', 'paymentApiKey', 'paymentWebhookSecret',
+  'googleMapsEmbedKey', 'googlePlacesBrowserKey',
+] as const;
+
+export function sanitizeRetailer<T extends Record<string, any>>(retailer: T): any {
+  const result = { ...retailer };
+  for (const field of SECRET_FIELDS) {
+    (result as any)[`has${field.charAt(0).toUpperCase()}${field.slice(1)}`] = !!result[field];
+    delete result[field];
+  }
+  if ((result as any).platformKey) {
+    (result as any).platformKey = {
+      ...(result as any).platformKey,
+      key: undefined, // Never expose the raw key
+      hasKey: !!(result as any).platformKey.key,
+    };
+  }
+  return result;
+}
 
 export class RegisterRetailerDto {
   @IsString()
@@ -194,11 +214,12 @@ export class RegistryService {
     return retailer;
   }
 
-  async getAuditLogs(retailerId: number, limit = 50) {
+  async getAuditLogs(retailerId: number, limit?: number) {
+    const safeTake = Math.min(limit ?? 50, 200);
     return this.prisma.auditLog.findMany({
       where: { retailerId },
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      take: safeTake,
     });
   }
 
@@ -308,6 +329,9 @@ export class RegistryService {
   }
 
   async updateBySlug(slug: string, dto: UpdateRetailerDto) {
+    // Validate existence — throws NotFoundException if not found
+    await this.findBySlug(slug);
+
     if (dto.mcpServerUrl && !(await isSsrfSafe(dto.mcpServerUrl))) {
       throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
     }

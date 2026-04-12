@@ -6,6 +6,10 @@ import { RegistryService } from '../registry/registry.service';
 import { KeysService } from '../keys/keys.service';
 import { callRetailerTool, pingRetailer } from './retailer-client';
 
+// Simple TTL cache for active retailers list — refreshes every 30s
+let activeRetailersCache: { stores: { slug: string; name: string }[]; expiry: number } | null = null;
+const ACTIVE_RETAILERS_TTL_MS = 30_000;
+
 /**
  * Mounts the MCP gateway onto an Express app.
  *
@@ -64,7 +68,7 @@ export function mountGatewayMcp(
   // ── Helper: execute tool and log audit event ──────────────────────────────
   async function executeAndLog(retailer: any, toolName: string, args: any) {
     const result = await callRetailerTool(retailer, toolName, args);
-    
+
     // Only log if it's a "confirm" action (actual write) and not an error
     if (args.confirm === true && !(result as any).isError) {
       await registry.addAuditLog(retailer.id, `mcp:${toolName}`, {
@@ -72,7 +76,7 @@ export function mountGatewayMcp(
         result: (result as any).content?.[0]?.text?.substring(0, 500),
       });
     }
-    
+
     return result;
   }
 
@@ -91,17 +95,21 @@ export function mountGatewayMcp(
       'List all verified retailers registered on the Prompt Commerce gateway.',
       {},
       async () => {
-        const retailers = await registry.findActiveRetailers();
-        const stores = retailers.map((r) => ({
-          slug: r.slug,
-          name: r.name,
-        }));
+        const now = Date.now();
+        if (!activeRetailersCache || now > activeRetailersCache.expiry) {
+          const retailers = await registry.findActiveRetailers();
+          activeRetailersCache = {
+            stores: retailers.map((r) => ({ slug: r.slug, name: r.name })),
+            expiry: now + ACTIVE_RETAILERS_TTL_MS,
+          };
+        }
+
         return {
           content: [
             {
               type: 'text',
-              text: stores.length
-                ? JSON.stringify(stores, null, 2)
+              text: activeRetailersCache.stores.length
+                ? JSON.stringify(activeRetailersCache.stores, null, 2)
                 : 'No stores are currently registered.',
             },
           ],
