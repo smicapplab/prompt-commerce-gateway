@@ -599,12 +599,12 @@ export class AiChatService {
           return JSON.stringify({
             source: 'cache',
             products: products.map(p => ({
-              id: p.sellerId,
+              id: Number(p.sellerId),
               title: p.title,
               description: p.description,
-              price: p.price,
+              price: p.price != null ? Number(p.price) : null,
               sku: p.sku,
-              stock: p.stockQuantity,
+              stock: p.stockQuantity != null ? Number(p.stockQuantity) : null,
               images: p.images,
             }))
           });

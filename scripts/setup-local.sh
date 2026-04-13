@@ -113,6 +113,11 @@ step "Seeding database"
 npx ts-node prisma/seed.ts
 ok "Seed complete"
 
+# ── 8. PostgreSQL Search Setup ────────────────────────────────────────────────
+step "Applying Full Text Search infrastructure"
+docker compose exec -T postgres psql -U postgres -d pc_gateway < "$DIR/prisma/setup-fts.sql"
+ok "Search infrastructure (extensions, triggers, indexes) applied"
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "  ${G}╔══════════════════════════════════════════╗${N}"

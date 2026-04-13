@@ -229,8 +229,8 @@ export class CatalogService {
         ${priceMinFilter}
         ${priceMaxFilter}
         ${stockFilter}
-        AND search_vector @@ websearch_to_tsquery('simple', ${keywords})
-      ORDER BY ts_rank(search_vector, websearch_to_tsquery('simple', ${keywords})) DESC
+        AND search_vector @@ websearch_to_tsquery('english', ${keywords})
+      ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ${keywords})) DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
 
@@ -242,7 +242,7 @@ export class CatalogService {
         ${priceMinFilter}
         ${priceMaxFilter}
         ${stockFilter}
-        AND search_vector @@ websearch_to_tsquery('simple', ${keywords})
+        AND search_vector @@ websearch_to_tsquery('english', ${keywords})
     `;
 
     return { results, total: Number(countResult[0].count) };
