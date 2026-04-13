@@ -29,53 +29,78 @@ export function isPrivateIp(ip: string | undefined): boolean {
  * Returns true if the IPv6 address falls in a private/loopback/link-local range.
  */
 export function isPrivateIpv6(ip: string): boolean {
-  // Normalize: strip brackets (e.g. [::1] → ::1)
   const normalized = ip.replace(/^\[|\]$/g, '').toLowerCase();
-
-  if (normalized === '::1') return true; // loopback
-  if (normalized === '::') return true;  // unspecified
-
-  // Link-local: fe80::/10
+  if (normalized === '::1' || normalized === '::') return true;
   if (normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
     normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
-
-  // Unique Local Address: fc00::/7 (fc:: and fd::)
   if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
-
-  // Multicast: ff00::/8
   if (normalized.startsWith('ff')) return true;
-
   return false;
+}
+
+/**
+ * Resolves a hostname to an IPv4 address and validates that it is safe.
+ */
+export async function resolveSafeIp(hostname: string): Promise<string> {
+  const isDev = process.env.NODE_ENV === 'development';
+
+  // Explicitly allow localhost in dev mode
+  if (isDev && (hostname === 'localhost' || hostname === '127.0.0.1')) {
+    return '127.0.0.1';
+  }
+
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+    if (!isDev && isPrivateIp(hostname)) {
+      throw new Error(`SSRF blocked: ${hostname} is a private IP`);
+    }
+    return hostname;
+  }
+
+  if (hostname.includes(':')) {
+    if (!isDev && isPrivateIpv6(hostname)) {
+      throw new Error(`SSRF blocked: ${hostname} is a private IPv6 address`);
+    }
+    return hostname;
+  }
+
+  try {
+    const addresses = await dns.resolve4(hostname);
+    if (!addresses.length) throw new Error(`Could not resolve: ${hostname}`);
+
+    const safeIps = isDev ? addresses : addresses.filter(addr => !isPrivateIp(addr));
+    if (safeIps.length === 0) {
+      throw new Error(`SSRF blocked: ${hostname} resolved to unsafe IPs`);
+    }
+    return safeIps[0];
+  } catch (err: any) {
+    if (isDev && hostname === 'localhost') return '127.0.0.1';
+    throw err;
+  }
 }
 
 /**
  * Validates that a URL is safe from SSRF by checking its protocol and resolving
  * the hostname to ensure it doesn't point to a private IP range.
- * 
- * NOTE: This is still vulnerable to DNS rebinding if used followed by a separate fetch()
- * Use safeFetch() instead for end-to-end protection.
  */
 export async function isSsrfSafe(url: string): Promise<boolean> {
   try {
     const parsed = new URL(url);
-    // Only allow http/https schemes
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
 
-    // Block numeric IP hostnames that are private
     const host = parsed.hostname;
-    // If it's already a dotted-decimal IPv4, check directly
+    const isDev = process.env.NODE_ENV === 'development';
+    if (isDev && (host === 'localhost' || host === '127.0.0.1')) return true;
+
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
       return !isPrivateIp(host);
     }
 
-    // IPv6 literal check (URL parser strips brackets: [::1] → ::1)
     if (host.includes(':')) {
       return !isPrivateIpv6(host);
     }
 
-    // Resolve the hostname and check all returned IPs
     const addresses = await dns.resolve4(host).catch(() => [] as string[]);
-    if (!addresses.length) return false; // unresolvable — block
+    if (!addresses.length) return false;
 
     return addresses.every(ip => !isPrivateIp(ip));
   } catch {
@@ -84,54 +109,13 @@ export async function isSsrfSafe(url: string): Promise<boolean> {
 }
 
 /**
- * Resolves a hostname to an IPv4 address and validates that it is safe (not private).
- * Returns the safe IP address.
- */
-export async function resolveSafeIp(hostname: string): Promise<string> {
-  // If it's already a dotted-decimal IPv4, check directly
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
-    if (isPrivateIp(hostname)) {
-      throw new Error(`SSRF blocked: ${hostname} is a private IP`);
-    }
-    return hostname;
-  }
-
-  // Block IPv6 literals
-  if (hostname.includes(':')) {
-    if (isPrivateIpv6(hostname)) {
-      throw new Error(`SSRF blocked: ${hostname} is a private IPv6 address`);
-    }
-    throw new Error(`IPv6 MCP server URLs are not supported`);
-  }
-
-  // Resolve the hostname and check all returned IPs
-  const addresses = await dns.resolve4(hostname);
-  if (!addresses.length) {
-    throw new Error(`Could not resolve hostname: ${hostname}`);
-  }
-
-  // Check all IPs, pick the first safe one
-  const safeIps = addresses.filter(addr => !isPrivateIp(addr));
-  if (safeIps.length === 0) {
-    throw new Error(`SSRF blocked: ${hostname} resolved to unsafe IPs: ${addresses.join(', ')}`);
-  }
-
-  return safeIps[0];
-}
-
-/**
  * A fetch-like implementation that pins the resolved IP to prevent DNS rebinding.
  */
 export async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
   const parsed = new URL(url);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(`Unsupported protocol: ${parsed.protocol}`);
-  }
-
   const hostname = parsed.hostname;
   const ip = await resolveSafeIp(hostname);
 
-  // We use the original URL but inject a custom lookup function to the agent
   const lookup = (_hostname: string, _options: any, callback: any) => {
     callback(null, ip, 4);
   };
@@ -141,47 +125,31 @@ export async function safeFetch(url: string, init?: RequestInit): Promise<Respon
     ? new https.Agent(agentOptions)
     : new http.Agent(agentOptions);
 
-  // Use global fetch with the custom dispatcher if available (Node 18+)
-  // or fallback to a custom implementation.
   try {
-    // @ts-ignore - 'dispatcher' is supported in undici-based fetch
-    return await fetch(url, {
-      ...init,
-      dispatcher: agent,
-    } as any);
+    // @ts-ignore
+    return await fetch(url, { ...init, dispatcher: agent } as any);
   } catch (e) {
-    // If 'dispatcher' is not supported or fails, fallback to manual http/https request
     return new Promise((resolve, reject) => {
       const module = parsed.protocol === 'https:' ? https : http;
       const headers = init?.headers ? (init.headers as any) : {};
-
       const req = module.request(url, {
         method: init?.method || 'GET',
         headers,
         lookup,
         timeout: 10000,
       }, (res) => {
-        const chunks: Buffer[] = [];
+        const chunks: any[] = [];
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
-          const body = Buffer.concat(chunks);
-          resolve(new Response(body, {
+          resolve(new Response(Buffer.concat(chunks), {
             status: res.statusCode,
             statusText: res.statusMessage,
             headers: res.headers as any,
           }));
         });
       });
-
       req.on('error', reject);
-      req.on('timeout', () => {
-        req.destroy();
-        reject(new Error('Request timeout'));
-      });
-
-      if (init?.body) {
-        req.write(init.body);
-      }
+      if (init?.body) req.write(init.body);
       req.end();
     });
   }

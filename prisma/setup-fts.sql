@@ -1,19 +1,20 @@
--- PostgreSQL Search Overhaul Setup
+-- PostgreSQL Search Overhaul Setup (v2: with English stemming support)
 -- This script enables Full Text Search (FTS) and Trigram fuzzy matching.
 
 -- 1. Enable Extension
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- 2. Create Trigger Function
--- Uses 'english' config for stemming (shoes→shoe, basketball→basketbal).
+-- Uses 'english' config for title/description (enables stemming: shoe -> shoes).
+-- Uses 'simple' config for tags (preserves exact values).
 -- Weights: A (Title), B (Tags), C (Description).
 CREATE OR REPLACE FUNCTION cached_products_search_vector_update()
 RETURNS trigger AS $$
 BEGIN
   NEW.search_vector :=
     setweight(to_tsvector('english', coalesce(NEW.title, '')), 'A') ||
-    setweight(to_tsvector('english', array_to_string(NEW.ai_tags, ' ')), 'B') ||
-    setweight(to_tsvector('english', lower(array_to_string(NEW.tags, ' '))), 'B') ||
+    setweight(to_tsvector('simple', array_to_string(NEW.ai_tags, ' ')), 'B') ||
+    setweight(to_tsvector('simple', lower(array_to_string(NEW.tags, ' '))), 'B') ||
     setweight(to_tsvector('english', coalesce(NEW.description, '')), 'C');
   RETURN NEW;
 END;

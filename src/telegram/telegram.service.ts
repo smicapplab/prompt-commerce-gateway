@@ -1459,8 +1459,22 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const cartCount = (await this.cartService.get(userId, storeSlug)).length;
       const shell = buildAiChatFooter(storeSlug, store.name, 'telegram', cartCount);
 
+      let intro = result.text || 'Here are the products I found for you:';
+
+      // Hard Guard: If we have products, strip any numbered lists or "![image]" markdown 
+      // from the AI prose to prevent redundancy with the visual cards.
+      if (result.products?.length) {
+        // Strip numbered lists like "1. Product Name..." or "1) Product Name..."
+        intro = intro.replace(/^\d+[\.)]\s+.*$/gm, '').trim();
+        // Strip image markdown ![alt](url)
+        intro = intro.replace(/!\[.*?\]\(.*?\)/g, '').trim();
+        // Strip double newlines left behind
+        intro = intro.replace(/\n{3,}/g, '\n\n');
+        
+        if (!intro || intro.length < 5) intro = 'Here are the best matches I found:';
+      }
+
       // Always send the AI text (now a brief intro if products found)
-      const intro = result.text || 'Here are the products I found for you:';
       await ctx.reply(intro, { parse_mode: 'HTML' });
 
       // If AI found products, render each one as a full photo card

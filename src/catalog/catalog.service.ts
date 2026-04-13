@@ -181,7 +181,7 @@ export class CatalogService {
       storeSlug: opts.storeSlug,
     };
 
-    // Strategy 1: Full-text search — fast, ranked, handles aiTags + title + description
+    // Strategy 1: Full-text search — fast, ranked, handles stemming (shoe -> shoes)
     let { results, total } = await this._ftsSearch(parsed.keywords, filterOpts);
 
     // Strategy 2: Trigram fuzzy fallback — brand names, typos, short keywords
@@ -207,6 +207,7 @@ export class CatalogService {
     const priceMaxFilter = maxPrice   != null ? Prisma.sql`AND price <= ${maxPrice}`       : Prisma.sql``;
     const stockFilter    = inStockOnly        ? Prisma.sql`AND stock_quantity > 0`         : Prisma.sql``;
 
+    // Use 'english' config for searching to support stemming (shoes -> shoe)
     const results = await this.prisma.$queryRaw<any[]>`
       SELECT
         id,
@@ -229,7 +230,12 @@ export class CatalogService {
         ${priceMinFilter}
         ${priceMaxFilter}
         ${stockFilter}
-        AND search_vector @@ websearch_to_tsquery('english', ${keywords})
+        AND (
+          -- Check both English (stemmed) and Simple (exact tags)
+          search_vector @@ websearch_to_tsquery('english', ${keywords})
+          OR
+          search_vector @@ websearch_to_tsquery('simple', ${keywords})
+        )
       ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ${keywords})) DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -242,7 +248,11 @@ export class CatalogService {
         ${priceMinFilter}
         ${priceMaxFilter}
         ${stockFilter}
-        AND search_vector @@ websearch_to_tsquery('english', ${keywords})
+        AND (
+          search_vector @@ websearch_to_tsquery('english', ${keywords})
+          OR
+          search_vector @@ websearch_to_tsquery('simple', ${keywords})
+        )
     `;
 
     return { results, total: Number(countResult[0].count) };
