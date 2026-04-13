@@ -5,7 +5,8 @@ import https from 'https';
 /**
  * Returns true if the IPv4 address falls in a private / link-local / loopback range.
  */
-export function isPrivateIp(ip: string): boolean {
+export function isPrivateIp(ip: string | undefined): boolean {
+  if (!ip) return true;
   const parts = ip.split('.').map(Number);
   if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) {
     return true; // treat malformed IPs as unsafe

@@ -27,8 +27,6 @@ import { esc, price, productDetail, cartSummary, orderConfirmation,
 
 const PAGE_SIZE = 5;
 
-// CheckoutState is now imported from ../shared/types
-
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
@@ -128,13 +126,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   // ─── Bot initialisation (supports hot-reload on config change) ───────────────
   async initBot(): Promise<void> {
-    // Gracefully stop existing polling bot before reinitialising
     if (this.bot && !this.webhookMode) {
       try { await this.bot.stop(); } catch { /* ignore */ }
     }
     this.bot = null;
 
-    // Load bot token from DB first; fall back to env var for local dev
     const token = (await this.settings.get('telegram_bot_token'))
       ?? process.env.TELEGRAM_BOT_TOKEN;
 
@@ -148,7 +144,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.bot = new Bot(token);
     this.registerHandlers();
 
-    // Register command menu shown in Telegram UI
     await this.bot.api.setMyCommands([
       { command: 'search',  description: 'Search products across all stores' },
       { command: 'stores',  description: 'Browse stores' },
@@ -160,33 +155,24 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const webhookUrl = (await this.settings.get('telegram_webhook_url'))?.trim();
 
     if (webhookUrl) {
-      // ── Webhook mode ────────────────────────────────────────────────────────
       this.webhookSecret = await this.ensureWebhookSecret();
       await this.bot.api.setWebhook(webhookUrl, { secret_token: this.webhookSecret });
       this.webhookMode = true;
       this.logger.log(`Telegram bot started (webhook → ${webhookUrl})`);
     } else {
-      // ── Polling mode ────────────────────────────────────────────────────────
-      // Delete any stale webhook before starting polling
       await this.bot.api.deleteWebhook({ drop_pending_updates: false });
       this.webhookMode = false;
       this.bot.start({ onStart: () => this.logger.log('Telegram bot started (polling).') });
     }
   }
 
-  // ─── Webhook helpers ─────────────────────────────────────────────────────────
-
-  /** Called by WebhookController for each incoming Telegram update. */
   async handleUpdate(update: unknown): Promise<void> {
     if (!this.bot || !this.webhookMode) return;
     await this.bot.handleUpdate(update as any);
   }
 
-  /** Validates the secret token Telegram sends in X-Telegram-Bot-Api-Secret-Token. */
   validateWebhookSecret(token: string): boolean {
     if (!this.webhookSecret || !token) return false;
-    // BUG-5: Compare the incoming token directly to the stored plaintext secret
-    // using timingSafeEqual to prevent timing attacks. Buffers must be equal length.
     try {
       const a = Buffer.from(token);
       const b = Buffer.from(this.webhookSecret);
@@ -197,7 +183,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Returns current mode + live webhook info from Telegram API. */
   async getWebhookStatus(): Promise<Record<string, unknown>> {
     if (!this.bot) return { mode: 'disabled', enabled: false };
     try {
@@ -214,15 +199,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private async ensureWebhookSecret(): Promise<string> {
     const stored = await this.settings.get('telegram_webhook_secret');
-
-    // BUG-5: Store and return the PLAINTEXT so that:
-    //   1. setWebhook() sends the plaintext to Telegram.
-    //   2. Telegram echoes it back in X-Telegram-Bot-Api-Secret-Token.
-    //   3. validateWebhookSecret() can compare directly with timingSafeEqual.
-    //
-    // Migration note: if `stored` looks like a 64-char SHA-256 hex digest from
-    // the old (broken) scheme, regenerate a fresh plaintext so the webhook is
-    // re-registered correctly on the next setWebhook() call.
     const looksLikeHash = stored && /^[0-9a-f]{64}$/.test(stored);
     if (stored && !looksLikeHash) return stored;
 
@@ -236,7 +212,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!this.bot) return;
     const bot = this.bot;
 
-    // ── /start ─────────────────────────────────────────────────────────────
     bot.command('start', async (ctx) => {
       await this.syncUser(ctx);
       const firstName = ctx.from?.first_name ?? 'there';
@@ -253,11 +228,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
     });
 
-    // ── /stores ────────────────────────────────────────────────────────────
     bot.command('stores', async (ctx) => {
       await this.syncUser(ctx);
       const stores = await this.registry.findActiveRetailers();
-      this.logger.log(`Found ${stores.length} active retailers: ${stores.map(s => s.slug).join(', ')}`);
       if (!stores.length) {
         await ctx.reply('No stores available right now.');
         return;
@@ -267,12 +240,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
     });
 
-    // ── /cart ──────────────────────────────────────────────────────────────
     bot.command('cart', async (ctx) => {
       const userId = await this.syncUser(ctx);
       if (!userId) return;
 
-      // Resolve store: active session → last viewed store → prompt user
       const aiSession = await this.telegramSession.getSession<any>(userId, 'ai');
       const checkoutState = await this.getCheckoutState(userId);
       const lastStoreSlug = await this.getLastStoreSlug(userId);
@@ -289,7 +260,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.sendCart(ctx, userId, slug);
     });
 
-    // ── /search ────────────────────────────────────────────────────────────
     bot.command('search', async (ctx) => {
       const query = ctx.match?.trim();
       if (!query) {
@@ -309,7 +279,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.sendSearchResults(ctx, query, 0);
     });
 
-    // ── /help ──────────────────────────────────────────────────────────────
     bot.command('help', async (ctx) => {
       await this.syncUser(ctx);
       await ctx.reply(
@@ -330,7 +299,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    // ── /myid ──────────────────────────────────────────────────────────────
     bot.command('myid', async (ctx) => {
       await this.syncUser(ctx);
       const chatId = ctx.chat?.id.toString();
@@ -343,20 +311,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    // ── Callback queries ───────────────────────────────────────────────────
     bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data;
       const userId = await this.syncUser(ctx);
       if (!userId) return;
 
-      // Answer immediately to clear the button spinner for all callbacks EXCEPT
-      // add-to-cart, which needs to answer last so it can show a toast message.
       if (!data.startsWith('a:')) {
         await ctx.answerCallbackQuery();
       }
 
       try {
-        // s:<slug> — store selected
         if (data.startsWith('s:')) {
           const slug = data.slice(2);
           await this.telegramSession.deleteSession(userId, 'ai');
@@ -369,7 +333,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // bk:<slug> — back to store menu
         if (data.startsWith('bk:')) {
           const slug = data.slice(3);
           await this.telegramSession.deleteSession(userId, 'ai');
@@ -381,14 +344,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // cats:<slug> — list categories
         if (data.startsWith('cats:')) {
           const slug = data.slice(5);
           await this.sendCategories(ctx, slug);
           return;
         }
 
-        // delivery:<type>:<slug> — delivery type selected
         if (data.startsWith('delivery:')) {
           const firstColon  = data.indexOf(':');
           const secondColon = data.indexOf(':', firstColon + 1);
@@ -407,7 +368,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // pmnt:<method>:<slug> — payment method selected
         if (data.startsWith('pmnt:')) {
           const firstColon  = data.indexOf(':');
           const secondColon = data.indexOf(':', firstColon + 1);
@@ -425,7 +385,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           await this.showOrderSummary(ctx, userId, slug, state, true, retailer);
           return;
         }
-        // addr:
         if (data.startsWith('addr:')) {
           const action = data.slice(5);
           const state = await this.getCheckoutState(userId);
@@ -436,11 +395,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             await ctx.editMessageText('📍 Please type your full delivery address:\n<i>(e.g. "123 Main St, Barangay San Jose, Makati City, Metro Manila")</i>', { parse_mode: 'HTML' });
             return;
           }
-          // Select existing
           const id = parseInt(action);
           const addr = await this.prisma.telegramAddress.findUnique({ where: { id } });
           if (addr && addr.userId === userId) {
-            // Promote to default (most recently used)
             await this.prisma.telegramAddress.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
             await this.prisma.telegramAddress.update({ where: { id }, data: { isDefault: true } });
 
@@ -472,7 +429,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
         
-        // lbl:
         if (data.startsWith('lbl:')) {
           const lbl = data.slice(4);
           const state = await this.getCheckoutState(userId);
@@ -482,7 +438,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // c:<slug>:<catId> — products in category
         if (data.startsWith('c:')) {
           const parts = data.split(':');
           if (parts.length < 3) return;
@@ -491,7 +446,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // pg:<slug>:<catId>:<page> — paginate products
         if (data.startsWith('pg:')) {
           const parts = data.split(':');
           if (parts.length < 4) return;
@@ -502,7 +456,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // p:<slug>:<productId> — product detail
         if (data.startsWith('p:')) {
           const parts = data.split(':');
           if (parts.length < 3) return;
@@ -511,18 +464,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // a:<slug>:<productId>:<qty> — add to cart
         if (data.startsWith('a:')) {
           const parts = data.split(':');
           if (parts.length < 3) return;
           const [, slug, productId, qtyStr] = parts;
-          // Guard quantity between 1 and 99 (Finding #11)
           const qty = Math.max(1, Math.min(99, qtyStr ? parseInt(qtyStr) : 1));
           await this.addToCart(ctx, userId, slug, parseInt(productId), qty);
           return;
         }
 
-        // qty:<slug>:<productId> — ask for quantity
         if (data.startsWith('qty:')) {
           const parts = data.split(':');
           if (parts.length < 3) return;
@@ -531,7 +481,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // r:<slug>:<productId> — remove from cart
         if (data.startsWith('r:')) {
           const parts = data.split(':');
           if (parts.length < 3) return;
@@ -541,21 +490,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // cart:<slug> — view cart
         if (data.startsWith('cart:')) {
           const slug = data.slice(5);
           await this.sendCart(ctx, userId, slug);
           return;
         }
 
-        // chk:<slug> — start checkout
         if (data.startsWith('chk:')) {
           const slug = data.slice(4);
           await this.startCheckout(ctx, userId, slug);
           return;
         }
 
-        // ai:<slug> — enter AI mode
         if (data.startsWith('ai:')) {
           const slug = data.slice(3);
           await this.telegramSession.setSession(userId, 'ai', { storeSlug: slug });
@@ -567,14 +513,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // confirm:<slug> — place the order
         if (data.startsWith('confirm:')) {
           const slug = data.slice(8);
           await this.confirmOrder(ctx, userId, slug);
           return;
         }
 
-        // cancel:<slug> — abort checkout (preserves cart so the user can retry)
         if (data.startsWith('cancel:')) {
           const slug = data.slice(7);
           await this.deleteCheckoutState(userId);
@@ -586,7 +530,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        // srch:<offset> — paginate cross-store search results
         if (data.startsWith('srch:')) {
           const offset = parseInt(data.slice(5)) || 0;
           const query  = await this.getSearchQuery(userId);
@@ -601,23 +544,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
     });
 
-    // ── Text messages ──────────────────────────────────────────────────────
     bot.on('message:text', async (ctx) => {
       const userId = await this.syncUser(ctx);
       if (!userId) return;
       let text = ctx.message.text;
 
-      // M1: Guard against excessively long messages (10KB limit in TG, but we want to cap for AI/DB)
       const MAX_LENGTH = 4000;
       if (text.length > MAX_LENGTH) {
-        this.logger.warn(`User ${userId} sent long message (${text.length} chars). Truncating.`);
         text = text.slice(0, MAX_LENGTH);
         await ctx.reply('⚠️ <b>Message too long</b>\nYour message was truncated to 4,000 characters to process it effectively.', { parse_mode: 'HTML' });
       }
 
       const lowerText = text.toLowerCase();
 
-      // Check for human handover keywords (strictly phrases to avoid accidental triggers)
       const humanKeywords = [
         '/human', '/agent', 'talk to a person', 'speak to a person', 
         'connect me to a human', 'talk to a human', 'speak to a human',
@@ -626,7 +565,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const isRequestingHuman = humanKeywords.some(k => lowerText.includes(k));
 
       if (isRequestingHuman) {
-        // Resolve active store session
         const aiSession = await this.telegramSession.getSession<any>(userId, 'ai');
         const checkoutState = await this.getCheckoutState(userId);
         const lastStoreSlug = await this.getLastStoreSlug(userId);
@@ -646,34 +584,29 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      if (text.startsWith('/')) return; // skip commands
+      if (text.startsWith('/')) return;
 
-      // Checkout flow
       const checkoutState = await this.getCheckoutState(userId);
       if (checkoutState) {
         await this.handleCheckoutInput(ctx, userId, text, checkoutState);
         return;
       }
 
-      // AI mode
       const aiState = await this.telegramSession.getSession(userId, 'ai');
       if (aiState) {
         await this.handleAiMessage(ctx, userId, text, aiState.storeSlug);
         return;
       }
 
-      // Default — treat free text as a product search across all stores
       if (userId) await this.setSearchQuery(userId, text);
       await this.sendSearchResults(ctx, text, 0);
     });
 
-    // ── Error handler ──────────────────────────────────────────────────────
     bot.catch((err) => {
       this.logger.error('Bot error:', err);
     });
   }
 
-  /** Send a message to a specific user/chat ID */
   async sendMessage(chatId: string | number, text: string, options: any = {}): Promise<void> {
     if (!this.bot) throw new Error('Bot not initialised');
     await this.bot.api.sendMessage(chatId, text, { parse_mode: 'HTML', ...options });
@@ -683,7 +616,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const state = await this.getCheckoutState(userId);
     if (!state || state.storeSlug !== storeSlug) return;
 
-    // Sanitize and cap input lengths
     const clean = {
       streetLine:       String(address.streetLine  || '').slice(0, 200),
       barangay:         String(address.barangay    || '').slice(0, 100),
@@ -695,7 +627,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       lng:  typeof address.lng === 'number' ? address.lng : null,
     };
 
-    // Update session state
     state.province = clean.province;
     state.city = clean.city;
     state.barangay = clean.barangay;
@@ -738,7 +669,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ─── Cross-store product search ─────────────────────────────────────────────
   private async sendSearchResults(
     ctx: any,
     rawQuery: string,
@@ -749,7 +679,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const userId = ctx.from?.id.toString();
     const chatId = ctx.chat?.id;
 
-    // ── 1. Delete previous messages if paginating (Issue 1b) ──────────────────
     if (userId && chatId && edit) {
       const state = await this.getResultsState(userId);
       if (state) {
@@ -758,14 +687,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         }
         await this.deleteResultsState(userId);
       }
-      // Delete the pagination message itself
       try { await ctx.deleteMessage(); } catch {}
     }
 
     const { results, total, parsed, fallback } = await this.catalog.smartSearch(rawQuery, { limit: PAGE, offset });
     const { keywords, maxPrice, minPrice, inStockOnly } = parsed;
 
-    // ── 2. Build header/filter labels ────────────────────────────────────────
     const ph = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 0 })}`;
     const filters: string[] = [];
     if (keywords)                 filters.push(`<b>${esc(keywords)}</b>`);
@@ -784,7 +711,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Cart context for shortcut button
     const aiSession = userId ? await this.telegramSession.getSession<any>(userId, 'ai') : null;
     const cartSlug = userId
       ? (aiSession?.storeSlug ?? await this.getLastStoreSlug(userId))
@@ -797,16 +723,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     const newMessageIds: number[] = [];
 
-    // ── 3. Render Photo Cards (Issue 1b) ──────────────────────────────────────
     for (let i = 0; i < results.length; i++) {
       const p = results[i];
-      
-      // Page info only on the last card
       const pageInfo = (i === results.length - 1) 
         ? `Page ${currentPage} of ${totalPages} · ${total} results`
         : undefined;
-      
-      // Header info only on the first card
       const headerPrefix = (i === 0)
         ? `🛍 <b>Search results:</b> ${label}${fallbackNote}\n\n`
         : '';
@@ -824,7 +745,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         { showStore: true, pageInfo }
       );
 
-      // Get cart qty for badge (Issue 1b)
       let cartQty = 0;
       if (userId && p.storeSlug) {
         cartQty = await this.cartService.getItemQty(userId, p.storeSlug, p.sellerId);
@@ -854,7 +774,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       if (sentMsg) newMessageIds.push(sentMsg.message_id);
     }
 
-    // ── 4. Navigation footer message ──────────────────────────────────────────
     const navKeyboard = new InlineKeyboard();
     if (hasPrev) navKeyboard.text('← Prev', `srch:${offset - PAGE}`);
     if (hasNext) navKeyboard.text('Next →', `srch:${offset + PAGE}`);
@@ -876,16 +795,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ─── Send categories ────────────────────────────────────────────────────────
-  // Cache-first: reads from gateway DB if synced, falls back to seller MCP.
   private async sendCategories(ctx: any, slug: string): Promise<void> {
     let categories: Array<{ id: number; name: string }> = [];
-
     const cached = await this.catalog.getCategories(slug);
     if (cached.length) {
       categories = cached.map(c => ({ id: c.sellerId, name: c.name }));
     } else {
-      // Fallback: live MCP call
       try {
         const retailer = await this.getRetailer(slug);
         const result = await callRetailerTool(retailer, 'list_categories', {}) as any;
@@ -909,8 +824,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  // ─── Send product list ──────────────────────────────────────────────────────
-  // Cache-first: reads from gateway DB if synced, falls back to seller MCP.
   private async sendProducts(
     ctx: any,
     slug: string,
@@ -923,7 +836,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     const synced = await this.catalog.isSynced(slug);
     if (synced) {
-      // Read from gateway DB cache
       const rows = await this.catalog.getProducts(slug, {
         categoryId: catId !== 'all' ? catId : undefined,
         limit: PAGE_SIZE + 1,
@@ -934,7 +846,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         id: r.sellerId, title: r.title, price: r.price, stock_quantity: r.stockQuantity,
       }));
     } else {
-      // Fallback: live MCP call
       try {
         const retailer = await this.getRetailer(slug);
         const args: Record<string, unknown> = { limit: offset + PAGE_SIZE + 1 };
@@ -971,11 +882,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  // ─── Send product detail ────────────────────────────────────────────────────
   private async sendProductDetail(ctx: any, slug: string, productId: number): Promise<void> {
     const userId = ctx.from?.id.toString();
-
-    // ── 1. Resolve product: gateway cache first (fast), MCP fallback ──────────
     let product: any = null;
     const cached = await this.catalog.getProduct(slug, productId);
     if (cached) {
@@ -990,7 +898,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         images:         cached.images,
       };
     } else {
-      // Live MCP call as fallback when product not in cache
       try {
         const retailer = await this.getRetailer(slug);
         const result   = await callRetailerTool(retailer, 'get_product', { id: productId }) as any;
@@ -1005,22 +912,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // ── 2. Track last store for /cart command ─────────────────────────────────
     if (userId) await this.setLastStoreSlug(userId, slug);
 
-    // ── 3. Resolve image URL ──────────────────────────────────────────────────
-    // The cached value may be:
-    //  a) an absolute HTTPS URL  → use directly
-    //  b) an absolute HTTP URL   → filtered out by sync's filterSecureImageUrls, so
-    //                              cached.images[] ends up empty; handled by (c)
-    //  c) a relative path        → seller_public_url was missing at sync time;
-    //                              absolutise now using the store's mcpServerUrl
     let imageUrl: string | undefined = Array.isArray(product.images)
       ? product.images[0]
       : (product.image_url as string | undefined);
 
     if (imageUrl && !imageUrl.startsWith('http')) {
-      // Relative path — build an absolute URL using the store's known public URL.
       try {
         const retailer = await this.registry.findBySlug(slug);
         const base = (retailer.mcpServerUrl ?? '').replace(/\/$/, '');
@@ -1028,8 +926,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       } catch { imageUrl = undefined; }
     }
 
-    // If still no absolute image in the cache (e.g. filtered out because the
-    // seller runs on HTTP), try the live MCP call for a fresh URL.
     if (!imageUrl) {
       try {
         const retailer = await this.getRetailer(slug);
@@ -1038,11 +934,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         const mcpProd  = JSON.parse(raw);
         const mcpImg   = Array.isArray(mcpProd.images) ? mcpProd.images[0] : mcpProd.image_url;
         if (typeof mcpImg === 'string' && mcpImg.startsWith('http')) imageUrl = mcpImg;
-      } catch { /* no image — proceed without */ }
+      } catch { /* no image */ }
     }
 
-    // ── 4. Choose keyboard based on context ───────────────────────────────────
-    // Priority: AI session > global search query > default category nav.
     let keyboard;
     const cartCount = userId ? (await this.cartService.get(userId, slug)).length : 0;
     const aiSession = userId ? await this.telegramSession.getSession(userId, 'ai') : null;
@@ -1055,14 +949,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       keyboard = productDetailKeyboard(slug, productId, 'all', 0, cartCount);
     }
 
-    // ── 5. Show product — photo if available, plain text otherwise ────────────
     if (imageUrl?.startsWith('http')) {
-      // Remove the keyboard from the previous list/search message so it doesn't
-      // look orphaned after we send the new photo message below.
       try { await ctx.editMessageReplyMarkup({ reply_markup: undefined }); } catch {}
-
-      // Telegram photo captions are capped at 1 024 characters.
-      // Truncate long descriptions before building the caption to stay under the limit.
       const captionProduct = {
         ...product,
         description: product.description && product.description.length > 300
@@ -1072,7 +960,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const caption = productDetail(captionProduct);
       await ctx.replyWithPhoto(imageUrl, { caption, parse_mode: 'HTML', reply_markup: keyboard });
     } else {
-      // No image — edit the existing message in-place (keeps thread tidy).
       const msg = productDetail(product);
       try {
         await ctx.editMessageText(msg, { parse_mode: 'HTML', reply_markup: keyboard });
@@ -1082,11 +969,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ─── Add to cart ────────────────────────────────────────────────────────────
   private async addToCart(ctx: any, userId: string, slug: string, productId: number, qty: number = 1): Promise<void> {
     let product: any = {};
-
-    // Try gateway cache first (fast); fall back to live MCP call
     const cached = await this.catalog.getProduct(slug, productId);
     if (cached) {
       product = {
@@ -1122,17 +1006,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       price:     product.price ?? 0,
     }, qty);
 
-    // Track last store so /cart command works after adding from global search
     await this.setLastStoreSlug(userId, slug);
 
     const total = await this.cartService.total(userId, slug);
-    // Answer with a toast first (must be before any message edit)
     await ctx.answerCallbackQuery(`✅ Added! Cart total: ${price(total)}`);
-    // Then update the message to show the cart so the user can see what's in it
     await this.sendCart(ctx, userId, slug);
   }
 
-  // ─── Send cart ──────────────────────────────────────────────────────────────
   private async sendCart(ctx: any, userId: string, slug: string): Promise<void> {
     const retailer = await this.registry.findBySlug(slug);
     const items = await this.cartService.get(userId, slug);
@@ -1143,7 +1023,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       ? cartKeyboard(slug, items)
       : emptyCartKeyboard(slug);
 
-    // Try edit first, fall back to new message
     try {
       await ctx.editMessageText(text, { parse_mode: 'HTML', reply_markup });
     } catch {
@@ -1151,7 +1030,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ─── Checkout flow ──────────────────────────────────────────────────────────
   private async startCheckout(ctx: any, userId: string, slug: string): Promise<void> {
     if (await this.cartService.isEmpty(userId, slug)) {
       await ctx.editMessageText('Your cart is empty. Add some products first!', {
@@ -1173,7 +1051,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Prefill name & email and prompt for address
     const fullName = `${user.savedFirstName} ${user.savedLastName || ''}`.trim();
     const state: CheckoutState = {
       storeSlug: slug,
@@ -1191,7 +1068,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const state = await this.getCheckoutState(userId);
     if (!state) return;
 
-    // ── Address Picker (Mini App) ──
     const apiKey = process.env.GOOGLE_PLACES_API_KEY || await this.settings.get('google_places_api_key');
     const gatewayUrl = await this.settings.get('gateway_public_url') || 'http://localhost:3002';
 
@@ -1201,8 +1077,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       kb.webApp('📍 Enter Delivery Address', webAppUrl).row();
     }
 
-    // BUG-1 FIX: Do not set freeAddress eagerly if we have buttons to show.
-    // The user should click "Enter Manually" or use the picker/saved addresses.
     if (apiKey || addresses.length > 0) {
       state.step = 'addressList';
     } else {
@@ -1210,17 +1084,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
     await this.setCheckoutState(userId, state);
 
-    // Sort so default is on top
     const sorted = [...addresses].sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
 
-    // Show top 4 saved addresses
     for (const addr of sorted.slice(0, 4)) {
       const labelBadge = addr.label ? `${addr.label} — ` : '';
       const brief = `${labelBadge}${addr.streetLine}, ${addr.city}`.slice(0, 40);
       kb.text(`📋 Use ${brief}`, `addr:${addr.id}`).row();
     }
 
-    // Show "Enter Manually" or "Add New Address" only if there's an alternative (API key or saved addresses)
     if (apiKey || sorted.length > 0) {
       const manualLabel = apiKey ? '✏️ Enter Manually' : '➕ Add New Address';
       kb.text(manualLabel, 'addr:new').row();
@@ -1251,8 +1122,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     text: string,
     state: CheckoutState,
   ): Promise<void> {
-    const { storeSlug } = state;
-
     if (state.step === 'name') {
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 100) {
@@ -1284,7 +1153,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     if (state.step === 'freeAddress') {
       const trimmed = text.trim();
-      if (!trimmed || trimmed.length < 10) {
+      if (trimmed.length < 10) {
         await ctx.reply('⚠️ Please enter a complete address (at least 10 characters).');
         return;
       }
@@ -1375,8 +1244,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ─── Confirm / Cancel order callbacks ───────────────────────────────────────
-  // (Registered separately to keep the main callback handler clean)
   private async confirmOrder(ctx: any, userId: string, slug: string): Promise<void> {
     const state = await this.getCheckoutState(userId);
     if (!state || state.storeSlug !== slug) {
@@ -1396,8 +1263,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const { orderId, total, retailer, payment, items } = await this.checkout.placeOrder(userId, state, 'telegram');
-      
-      // Cleanup session only on SUCCESS
       await this.deleteCheckoutState(userId);
 
       if (payment?.status === 'paid') {
@@ -1460,7 +1325,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         );
       }
 
-      // 4. Notify seller if configured
       if (retailer.telegramNotifyChatId && this.bot) {
         try {
           const itemLines = items.map((i: any) => `• ${i.title} × ${i.quantity} = ${price(i.price * i.quantity)}`).join('\n');
@@ -1485,7 +1349,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await ctx.answerCallbackQuery(`❌ Order failed: ${err.message}`);
     }
   }
-  // ─── Notify user of order status change (called by OrdersService sync) ───────
+
   async notifyOrderStatusChange(params: {
     chatId: string;
     orderId: number;
@@ -1525,7 +1389,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
 
-  // ─── Notify user of payment status (called by WebhookController) ────────────
   async notifyPaymentStatus(params: {
     buyerRef:    string;
     storeSlug:   string;
@@ -1569,7 +1432,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const store = await this.registry.findBySlug(storeSlug);
 
-    // Resolve AI config from DB (per-store fields on Retailer)
     const aiConfig = this.resolveAiConfig(store);
     if (!aiConfig) {
       await ctx.reply(
@@ -1580,13 +1442,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // ── Unified Logging: Log buyer message ──
     const firstName = ctx.from?.first_name || '';
     const lastName = ctx.from?.last_name || '';
     const buyerName = `${firstName} ${lastName}`.trim() || ctx.from?.username || 'Buyer';
     
     const conv = await this.conversationService.getOrCreate(String(userId), buyerName, storeSlug);
-    await this.conversationService.logMessage(conv.id, storeSlug, 'buyer', text, undefined, false, conv);
+    // Non-blocking logging
+    this.conversationService.logMessage(conv.id, storeSlug, 'buyer', text, undefined, false, conv).catch(() => {});
 
     await ctx.replyWithChatAction('typing');
 
@@ -1597,16 +1459,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const cartCount = (await this.cartService.get(userId, storeSlug)).length;
       const shell = buildAiChatFooter(storeSlug, store.name, 'telegram', cartCount);
 
+      // Always send the AI text (now a brief intro if products found)
+      const intro = result.text || 'Here are the products I found for you:';
+      await ctx.reply(intro, { parse_mode: 'HTML' });
+
+      // If AI found products, render each one as a full photo card
       if (result.products?.length) {
-        // Products found: skip AI prose, show cards only.
-        // Nav footer is appended to the last card so the user still has Cart/Back to Store.
         await this.sendAiProductCards(ctx, userId, storeSlug, result.products, shell.telegramKeyboard);
       } else {
-        // No products: show full AI text with nav footer
-        await ctx.reply(result.text, { parse_mode: 'HTML', reply_markup: shell.telegramKeyboard });
+        // Just the footer if no cards follow
+        await ctx.reply('─────────────', { reply_markup: shell.telegramKeyboard });
       }
 
-      // AI reply logging is handled inside AiChatService.chat()
     } catch (err) {
       this.logger.error(`AI chat error: ${err}`);
       await ctx.reply(
@@ -1616,10 +1480,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Renders AI-found products as individual photo cards, matching the regular
-   * search UX. Uses productDetailAiKeyboard so "Back" returns to AI chat.
-   */
   private async sendAiProductCards(
     ctx: any,
     userId: string,
@@ -1651,7 +1511,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         'html',
       );
 
-      // On the last card, append the nav footer rows so the user has Cart/Back to Store
       const cardRows: any[][] = [
         [
           { text: addLabel,      callback_data: CB.qty(storeSlug, p.id) },
@@ -1661,7 +1520,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       ];
       const reply_markup = { inline_keyboard: cardRows };
 
-      // Resolve image: use first image from captured data if available
       const imageUrl = Array.isArray(p.images) && p.images.length
         ? p.images[0]
         : await this.browsing.resolveImageUrl(p as any, storeSlug).catch(() => null);
@@ -1671,14 +1529,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           await ctx.replyWithPhoto(imageUrl, { caption, parse_mode: 'HTML', reply_markup });
           continue;
         } catch {
-          // Image send failed — fall through to text card
         }
       }
       await ctx.reply(caption, { parse_mode: 'HTML', reply_markup });
     }
   }
 
-  // ─── Resolve per-store AI config ────────────────────────────────────────────
   private resolveAiConfig(store: any): StoreAiConfig | null {
     const provider = (store.aiProvider ?? 'claude') as 'claude' | 'gemini' | 'openai';
     const apiKey   = store.aiApiKey ?? null;
@@ -1692,7 +1548,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  // ─── Helper: resolve retailer target ───────────────────────────────────────
   private async getRetailer(slug: string) {
     const r = await this.registry.findBySlug(slug);
     if (!r.platformKey?.key) throw new Error(`No active key for store "${slug}"`);
@@ -1711,10 +1566,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /**
-   * Edit a message text in-place. If that fails (e.g. the current message is a
-   * photo/media message that can't be converted to text), send a fresh text reply.
-   */
   private async safeEditText(ctx: any, text: string, opts: any = {}): Promise<void> {
     try {
       await ctx.editMessageText(text, opts);
@@ -1728,7 +1579,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const state = await this.getCheckoutState(userId);
     if (!state) return;
 
-    // ── Parse payment methods ─────────────────────────────────────────────
     let methods: string[] = [];
     try {
       methods = JSON.parse(retailer.paymentMethods || '[]');
@@ -1736,7 +1586,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`Failed to parse paymentMethods for ${slug}: ${e}`);
     }
 
-    // Fallback to legacy logic if paymentMethods is empty
     if (methods.length === 0) {
       const allowCod         = retailer.allowCod ?? true;
       const provider         = (retailer.paymentProvider || 'cod').toLowerCase();
@@ -1761,7 +1610,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      // Only one method available — auto-select and skip the screen.
       state.paymentMethod = hasOnlinePayment ? provider : 'cod';
       state.step = 'confirm';
       await this.setCheckoutState(userId, state);
@@ -1769,7 +1617,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // ── New multi-method logic ────────────────────────────────────────────
     if (methods.length > 1) {
       const kb = new InlineKeyboard();
       for (const m of methods) {
@@ -1785,7 +1632,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Only one method available — auto-select and skip the screen.
     state.paymentMethod = methods[0];
     state.step = 'confirm';
     await this.setCheckoutState(userId, state);

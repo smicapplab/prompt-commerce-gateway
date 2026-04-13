@@ -57,7 +57,7 @@ export class ConversationService {
       buyer_name: buyerName,
       channel,
       gateway_id: conv.id,
-    }).catch(err => this.logger.error(`Failed to mirror conversation to seller: ${err.message}`));
+    }).catch(err => this.logger.error(`[Mirror] Failed to mirror conversation: ${err.message}`));
 
     return conv;
   }
@@ -106,7 +106,7 @@ export class ConversationService {
 
     if (skipMirror) return conv;
 
-    // Mirror to seller app
+    // Mirror to seller app (fire-and-forget)
     this.mirrorToSeller(conv.storeSlug, 'POST', `/api/conversations/lookup`, {
       buyer_ref: conv.buyerRef,
       channel: conv.channel
@@ -119,7 +119,7 @@ export class ConversationService {
         });
       }
     })
-    .catch(err => this.logger.error(`Failed to mirror mode change to seller: ${err.message}`));
+    .catch(err => this.logger.error(`[Mirror] Failed to mirror mode change: ${err.message}`));
 
     return conv;
   }
@@ -139,7 +139,7 @@ export class ConversationService {
       await this.telegram.sendMessage(conv.buyerRef, `${prefix}${body}`, { parse_mode: 'HTML' });
     }
 
-    // 2. Log and mirror (this handles both PostgreSQL and SQLite)
+    // 2. Log and mirror (fire-and-forget mirror inside logMessage)
     return this.logMessage(conversationId, conv.storeSlug, 'human', body, senderName, false, conv);
   }
 
@@ -165,7 +165,6 @@ export class ConversationService {
     if (skipMirror) return msg;
 
     // Mirror to seller app (fire-and-forget)
-    // We need the seller-side conversation ID. For simplicity, we use buyer_ref to find it on their side.
     const conv = conversation || await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     if (conv) {
       this.mirrorToSeller(storeSlug, 'POST', `/api/conversations/lookup`, {
@@ -181,7 +180,7 @@ export class ConversationService {
           });
         }
       })
-      .catch(err => this.logger.error(`Failed to mirror message to seller: ${err.message}`));
+      .catch(err => this.logger.error(`[Mirror] Failed to mirror message: ${err.message}`));
     }
 
     return msg;
@@ -196,8 +195,8 @@ export class ConversationService {
 
   /** Internal helper to call seller app with gateway platform key */
   private async mirrorToSeller(slug: string, method: string, path: string, body: any, retries = 2) {
-    // SEC-C: Fetch retailer once before the retry loop to avoid redundant DB calls.
-    const retailer = await this.registry.findBySlug(slug);
+    // SEC-C: Use findOneBySlugInternal to get the platform key (findBySlug is sanitized)
+    const retailer = await this.registry.findOneBySlugInternal(slug);
     if (!retailer.platformKey) {
       throw new Error(`No platform key for retailer ${slug}`);
     }

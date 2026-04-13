@@ -197,6 +197,20 @@ export class RegistryService {
   }
 
   async findBySlug(slug: string) {
+    const retailer = await this.findOneBySlugInternal(slug);
+    return retailer;
+  }
+
+  async findById(id: number) {
+    const retailer = await this.findOneByIdInternal(id);
+    return retailer;
+  }
+
+  /**
+   * Internal lookup that returns the full Prisma object including secrets.
+   * MUST only be used by trusted internal services (e.g. MCP Gateway).
+   */
+  async findOneBySlugInternal(slug: string) {
     const retailer = await this.prisma.retailer.findUnique({
       where: { slug },
       include: { platformKey: true },
@@ -205,7 +219,10 @@ export class RegistryService {
     return retailer;
   }
 
-  async findById(id: number) {
+  /**
+   * Internal lookup that returns the full Prisma object including secrets.
+   */
+  async findOneByIdInternal(id: number) {
     const retailer = await this.prisma.retailer.findUnique({
       where: { id },
       include: { platformKey: true },
@@ -268,7 +285,7 @@ export class RegistryService {
 
   /** Admin: update retailer details or verification status. */
   async update(id: number, dto: UpdateRetailerDto) {
-    const existingRetailer = await this.findById(id);
+    const existingRetailer = await this.findOneByIdInternal(id);
 
     if (dto.mcpServerUrl && !(await isSsrfSafe(dto.mcpServerUrl))) {
       throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
@@ -299,7 +316,7 @@ export class RegistryService {
 
   /** Issue or rotate platform key and email it to the retailer. */
   async issueKey(id: number): Promise<string> {
-    const retailer = await this.findById(id);
+    const retailer = await this.findOneByIdInternal(id);
     const key = await this.keysService.issueKey(id);
 
     // Send the key via email
@@ -316,7 +333,7 @@ export class RegistryService {
 
   /** Admin: delete a retailer and all their data. */
   async remove(id: number): Promise<void> {
-    await this.findById(id);
+    await this.findOneByIdInternal(id);
     await this.prisma.retailer.delete({ where: { id } });
   }
 
@@ -330,7 +347,7 @@ export class RegistryService {
 
   async updateBySlug(slug: string, dto: UpdateRetailerDto) {
     // Validate existence — throws NotFoundException if not found
-    await this.findBySlug(slug);
+    await this.findOneBySlugInternal(slug);
 
     if (dto.mcpServerUrl && !(await isSsrfSafe(dto.mcpServerUrl))) {
       throw new BadRequestException(`Insecure MCP Server URL: ${dto.mcpServerUrl}`);
