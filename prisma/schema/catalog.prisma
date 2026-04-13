@@ -36,6 +36,7 @@ model CachedProduct {
   images        String[] // Postgres native array
   active        Boolean  @default(true)
   syncedAt      DateTime @default(now()) @map("synced_at")
+  searchVector  Unsupported("tsvector")? @map("search_vector")
 
   @@unique([storeSlug, sellerId])
   @@index([storeSlug])

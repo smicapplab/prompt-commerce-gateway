@@ -138,12 +138,9 @@ export class StorefrontService {
         inStockOnly: inStockOnly || parsed.inStockOnly 
       };
 
-      const [products, total] = await Promise.all([
-          this.catalogService.searchAllStores(parsed.keywords, filterOpts),
-          this.catalogService.countSearchAllStores(parsed.keywords, filterOpts)
-      ]);
+      const { results: products, total } = await this.catalogService.smartSearch(q || '', filterOpts);
 
-      const storeSlugs = [...new Set(products.map(p => p.storeSlug))];
+      const storeSlugs = [...new Set(products.map((p: any) => p.storeSlug as string))];
       const stores = await this.prisma.retailer.findMany({
           where: { slug: { in: storeSlugs } },
           select: { slug: true, mcpServerUrl: true, publicUrl: true }
@@ -158,7 +155,7 @@ export class StorefrontService {
       }
 
       return {
-          products: products.map(p => this._formatImages(p, urlMap.get(p.storeSlug) || '')),
+          products: products.map((p: any) => this._formatImages(p, urlMap.get(p.storeSlug) || '')),
           pagination: {
               total,
               page,

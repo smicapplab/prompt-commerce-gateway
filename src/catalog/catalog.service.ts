@@ -168,35 +168,7 @@ export class CatalogService {
     return where;
   }
 
-  // ── Cross-store search ────────────────────────────────────────────────────
-  async searchAllStores(
-    query: string,
-    opts: {
-      limit?:       number;
-      offset?:      number;
-      maxPrice?:    number;
-      minPrice?:    number;
-      inStockOnly?: boolean;
-      storeSlug?:   string;
-    } = {},
-  ) {
-    const { limit = 20, offset = 0, maxPrice, minPrice, inStockOnly, storeSlug } = opts;
-    return this.prisma.cachedProduct.findMany({
-      where: this._buildSearchWhere(query, { maxPrice, minPrice, inStockOnly, storeSlug }),
-      orderBy: [{ price: 'asc' }, { title: 'asc' }],
-      take: limit,
-      skip: offset,
-    });
-  }
-
-  async countSearchAllStores(
-    query: string,
-    opts: { maxPrice?: number; minPrice?: number; inStockOnly?: boolean; storeSlug?: string } = {},
-  ): Promise<number> {
-    return this.prisma.cachedProduct.count({
-      where: this._buildSearchWhere(query, opts),
-    });
-  }
+  // ── Search ───────────────────────────────────────────────────────────────
 
   async smartSearch(rawQuery: string, opts: { limit?: number; offset?: number; storeSlug?: string } = {}) {
     const parsed = parseSearchQuery(rawQuery || '');
@@ -209,83 +181,138 @@ export class CatalogService {
       storeSlug: opts.storeSlug,
     };
 
-    // Strategy 1: strict AND — every keyword must appear in title/desc/sku/tags
-    let [results, total] = await Promise.all([
-      this.searchAllStores(parsed.keywords, filterOpts),
-      this.countSearchAllStores(parsed.keywords, filterOpts),
-    ]);
+    // Strategy 1: Full-text search — fast, ranked, handles aiTags + title + description
+    let { results, total } = await this._ftsSearch(parsed.keywords, filterOpts);
 
-    // Strategy 2: OR fallback — any keyword matches (catches partial/synonym matches)
+    // Strategy 2: Trigram fuzzy fallback — brand names, typos, short keywords
     let fallback = false;
     if (total === 0 && parsed.keywords.trim()) {
-      [results, total] = await Promise.all([
-        this.searchAllStoresOr(parsed.keywords, filterOpts),
-        this.countSearchAllStoresOr(parsed.keywords, filterOpts),
-      ]);
+      ({ results, total } = await this._trgmSearch(parsed.keywords, filterOpts));
       if (total > 0) fallback = true;
     }
 
     return { results, total, parsed, fallback };
   }
 
-  // OR search: any keyword matches across title, description, sku, or tags
-  async searchAllStoresOr(
-    query: string,
-    opts: {
-      limit?:       number;
-      offset?:      number;
-      maxPrice?:    number;
-      minPrice?:    number;
-      inStockOnly?: boolean;
-      storeSlug?:   string;
-    } = {},
-  ) {
+  private async _ftsSearch(
+    keywords: string,
+    opts: { limit?: number; offset?: number; maxPrice?: number; minPrice?: number; inStockOnly?: boolean; storeSlug?: string },
+  ): Promise<{ results: any[]; total: number }> {
     const { limit = 20, offset = 0, maxPrice, minPrice, inStockOnly, storeSlug } = opts;
-    return this.prisma.cachedProduct.findMany({
-      where: this._buildSearchWhereOr(query, { maxPrice, minPrice, inStockOnly, storeSlug }),
-      orderBy: [{ price: 'asc' }, { title: 'asc' }],
-      take: limit,
-      skip: offset,
-    });
+
+    if (!keywords.trim()) return { results: [], total: 0 };
+
+    const storeFilter    = storeSlug  != null ? Prisma.sql`AND store_slug = ${storeSlug}` : Prisma.sql``;
+    const priceMinFilter = minPrice   != null ? Prisma.sql`AND price >= ${minPrice}`       : Prisma.sql``;
+    const priceMaxFilter = maxPrice   != null ? Prisma.sql`AND price <= ${maxPrice}`       : Prisma.sql``;
+    const stockFilter    = inStockOnly        ? Prisma.sql`AND stock_quantity > 0`         : Prisma.sql``;
+
+    const results = await this.prisma.$queryRaw<any[]>`
+      SELECT
+        id,
+        store_slug     AS "storeSlug",
+        seller_id      AS "sellerId",
+        title,
+        description,
+        sku,
+        price,
+        stock_quantity AS "stockQuantity",
+        category_id    AS "categoryId",
+        tags,
+        ai_tags        AS "aiTags",
+        images,
+        active,
+        synced_at      AS "syncedAt"
+      FROM cached_products
+      WHERE active = true
+        ${storeFilter}
+        ${priceMinFilter}
+        ${priceMaxFilter}
+        ${stockFilter}
+        AND search_vector @@ websearch_to_tsquery('simple', ${keywords})
+      ORDER BY ts_rank(search_vector, websearch_to_tsquery('simple', ${keywords})) DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const countResult = await this.prisma.$queryRaw<[{ count: bigint }]>`
+      SELECT COUNT(*) AS count
+      FROM cached_products
+      WHERE active = true
+        ${storeFilter}
+        ${priceMinFilter}
+        ${priceMaxFilter}
+        ${stockFilter}
+        AND search_vector @@ websearch_to_tsquery('simple', ${keywords})
+    `;
+
+    return { results, total: Number(countResult[0].count) };
   }
 
-  async countSearchAllStoresOr(
-    query: string,
-    opts: { maxPrice?: number; minPrice?: number; inStockOnly?: boolean; storeSlug?: string } = {},
-  ): Promise<number> {
-    return this.prisma.cachedProduct.count({
-      where: this._buildSearchWhereOr(query, opts),
-    });
-  }
+  private async _trgmSearch(
+    keywords: string,
+    opts: { limit?: number; offset?: number; maxPrice?: number; minPrice?: number; inStockOnly?: boolean; storeSlug?: string },
+  ): Promise<{ results: any[]; total: number }> {
+    const { limit = 20, offset = 0, maxPrice, minPrice, inStockOnly, storeSlug } = opts;
 
-  private _buildSearchWhereOr(
-    query: string,
-    opts: { maxPrice?: number; minPrice?: number; inStockOnly?: boolean; storeSlug?: string },
-  ) {
-    const { maxPrice, minPrice, inStockOnly, storeSlug } = opts;
-    const priceFilter: Record<string, number> = {};
-    if (minPrice != null) priceFilter.gte = minPrice;
-    if (maxPrice != null) priceFilter.lte = maxPrice;
+    if (!keywords.trim()) return { results: [], total: 0 };
 
-    // OR search: any word matches in any field
-    const words = query.trim().split(/\s+/).filter(Boolean);
-    const textOr = words.length
-      ? words.flatMap((word) => [
-          { title:       { contains: word, mode: 'insensitive' as const } },
-          { description: { contains: word, mode: 'insensitive' as const } },
-          { sku:         { contains: word, mode: 'insensitive' as const } },
-          { tags:        { hasSome: [word.toLowerCase()] } },
-          { aiTags:      { hasSome: [word.toLowerCase()] } },
-        ])
-      : [];
+    const storeFilter    = storeSlug  != null ? Prisma.sql`AND store_slug = ${storeSlug}` : Prisma.sql``;
+    const priceMinFilter = minPrice   != null ? Prisma.sql`AND price >= ${minPrice}`       : Prisma.sql``;
+    const priceMaxFilter = maxPrice   != null ? Prisma.sql`AND price <= ${maxPrice}`       : Prisma.sql``;
+    const stockFilter    = inStockOnly        ? Prisma.sql`AND stock_quantity > 0`         : Prisma.sql``;
+    const likePattern    = `%${keywords}%`;
 
-    return {
-      active: true,
-      storeSlug: storeSlug || undefined,
-      ...(Object.keys(priceFilter).length ? { price: priceFilter } : {}),
-      ...(inStockOnly ? { stockQuantity: { gt: 0 } } : {}),
-      ...(textOr.length ? { OR: textOr } : {}),
-    };
+    const results = await this.prisma.$queryRaw<any[]>`
+      SELECT
+        id,
+        store_slug     AS "storeSlug",
+        seller_id      AS "sellerId",
+        title,
+        description,
+        sku,
+        price,
+        stock_quantity AS "stockQuantity",
+        category_id    AS "categoryId",
+        tags,
+        ai_tags        AS "aiTags",
+        images,
+        active,
+        synced_at      AS "syncedAt"
+      FROM cached_products
+      WHERE active = true
+        ${storeFilter}
+        ${priceMinFilter}
+        ${priceMaxFilter}
+        ${stockFilter}
+        AND (
+          title ILIKE ${likePattern}
+          OR word_similarity(${keywords}, title) > 0.2
+          OR EXISTS (
+            SELECT 1 FROM unnest(ai_tags) AS t WHERE t ILIKE ${likePattern}
+          )
+        )
+      ORDER BY word_similarity(${keywords}, title) DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const countResult = await this.prisma.$queryRaw<[{ count: bigint }]>`
+      SELECT COUNT(*) AS count
+      FROM cached_products
+      WHERE active = true
+        ${storeFilter}
+        ${priceMinFilter}
+        ${priceMaxFilter}
+        ${stockFilter}
+        AND (
+          title ILIKE ${likePattern}
+          OR word_similarity(${keywords}, title) > 0.2
+          OR EXISTS (
+            SELECT 1 FROM unnest(ai_tags) AS t WHERE t ILIKE ${likePattern}
+          )
+        )
+    `;
+
+    return { results, total: Number(countResult[0].count) };
   }
 
   private _buildSearchWhere(
